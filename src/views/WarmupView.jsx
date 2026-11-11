@@ -1,3 +1,4 @@
+import { BodyWeightEntry } from "./BodyWeightEntry.jsx";
 import { Toggle } from '../ui/Toggle.jsx';
 import { PeakTestView } from './PeakTestView.jsx';
 import { PotentiationPullView } from './PotentiationPullView.jsx';
@@ -82,7 +83,8 @@ function WarmupTime({ seconds, label, target }) {
 }
 
 export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit = "lbs", onClose, addReps, updateRep = null,
-  onTrainingStateChange = null }) {
+  onTrainingStateChange = null, onBwSave = null }) {
+  const [editingWeight, setEditingWeight] = useState(false);
   // ── Warmup mode (boulder / route) ──
   // Persisted to LS so the user's last choice carries across sessions.
   // Default to "boulder" when no prior mode has been selected.
@@ -278,8 +280,12 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
           ⚠ Can't generate yet
         </div>
         <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6, marginBottom: 16 }}>
-          {protocol.reason}
+          {!(bodyWeightKg > 0) && onBwSave ? "Add your body weight to prepare your warm-up." : protocol.reason}
         </div>
+        {!(bodyWeightKg > 0) && onBwSave && <Btn onClick={() => setEditingWeight(true)}>
+          Add body weight
+        </Btn>}
+        {editingWeight && <BodyWeightEntry unit={unit} onSave={onBwSave} onClose={() => setEditingWeight(false)} />}
         <Btn onClick={onClose} small>Back</Btn>
       </Card>
     );

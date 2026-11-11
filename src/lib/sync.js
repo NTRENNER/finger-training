@@ -531,6 +531,12 @@ async function flushUpdateQueueOnce() {
     try {
       if (await currentUserId() !== owner) return done.size;
       if (e.kind === "rep") {
+        // A tombstone is explicit proof this row must never return. A
+        // merely missing row may still have an insert in flight.
+        if ((loadLS(LS_REP_DELETED_KEY) || []).includes(e.id)) {
+          done.add(updateTargetKey(e));
+          continue;
+        }
         const { data, error } = await supabase.from("reps")
           .update(e.updates).eq("user_id", owner).eq("id", e.id).select("id");
         if (!ownsLocalSession(owner)) return done.size;

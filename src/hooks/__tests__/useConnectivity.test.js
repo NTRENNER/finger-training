@@ -106,3 +106,12 @@ test("returning to the app syncs at once after the device was offline", () => {
   expect(result.current.isOnline).toBe(true);
   expect(result.current.syncSignal).toBe(1);
 });
+
+test('pending slot deletions bypass the foreground sync throttle', () => {
+  const { LS_REP_SLOT_DELETE_QUEUE_KEY } = require('../../lib/storage.js');
+  jest.useFakeTimers();
+  const { result } = renderHook(() => useConnectivity());
+  saveLS(LS_REP_SLOT_DELETE_QUEUE_KEY, [{ session_id: 's', set_num: 1, rep_num: 1, hand: 'L' }]);
+  comeBack();
+  expect(result.current.syncSignal).toBe(1);
+});

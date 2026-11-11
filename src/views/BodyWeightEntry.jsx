@@ -87,7 +87,7 @@ export function BodyWeightEntry({ unit = "lbs", entry = null, latest = null, ini
           <button type="button" onClick={onClose} style={{ background: C.border, color: C.text }}>
             {reminder ? "Not now" : "Cancel"}
           </button>
-          <button type="submit" disabled={saving} style={{ background: C.blue, color: "#fff" }}>
+          <button type="submit" disabled={saving} style={{ background: C.blue, color: C.bg }}>
             {saving ? "Saving…" : "Save"}
           </button>
         </div>

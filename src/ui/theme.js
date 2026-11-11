@@ -27,6 +27,19 @@ export const C = {
   yellow:  "#e3b341",
 };
 
+// Choose readable text for solid hex button fills, including custom colors.
+export function buttonTextColor(background) {
+  const hex = background?.replace(/^#/, "");
+  if (!/^(?:[\da-f]{3}|[\da-f]{6})$/i.test(hex || "")) return C.text;
+  const full = hex.length === 3 ? [...hex].map(c => c + c).join("") : hex;
+  const channels = [0, 2, 4].map(i => {
+    const value = parseInt(full.slice(i, i + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  return luminance > 0.179 ? "#000" : "#fff";
+}
+
 // Base body styles applied to the App root.
 export const base = {
   fontFamily: "'Segoe UI', system-ui, sans-serif",

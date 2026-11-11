@@ -1,3 +1,4 @@
+import { SessionBoundary } from "../ui/ErrorBoundary.jsx";
 import { displayedRepTime } from "../model/pullMeasurement.js";
 import { mixedAdjustmentText } from '../model/mixedLoadPrescription.js';
 import { HandCue } from './cards/HandCue.jsx';
@@ -550,7 +551,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
     if (visible) tindeq.targetKgRef.current = repPhase === "active" ? targetKg : null;
   }, [tindeq.targetKgRef, repPhase, targetKg, visible]);
 
-  return (
+  return <SessionBoundary render={() => (
     <PageFrame style={{ padding: "20px 16px" }}>
       {/* Header — single-set under curve-trust commit C; just show
           grip + hand. The "Set X of Y" line is gone. */}
@@ -699,7 +700,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
         />
       )}
     </PageFrame>
-  );
+  )} />;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -1320,7 +1321,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
   const interruptPrompt = useInterruptPrompt(tindeq, repActive);
   const liveSignal = tindeq.connected && !tindeq.signalRecovering;
 
-  return (
+  return <SessionBoundary render={() => (
     <PageFrame style={{ padding: "20px 16px" }}>
       {/* Header — single-set under curve-trust commit C; just show
           grip + hand. The "Set X of Y" line is gone. */}
@@ -1448,7 +1449,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
         />
       )}
     </PageFrame>
-  );
+  )} />;
 }
 
 function MixedHoldInfo({ config }) {

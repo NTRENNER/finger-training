@@ -6,7 +6,7 @@
 // come from src/ui/theme.js. No state; pure presentation.
 
 import React from "react";
-import { C } from "./theme.js";
+import { C, buttonTextColor } from "./theme.js";
 
 // Shared responsive shell for every top-level app view. It fills narrow
 // screens and caps desktop reading/interaction width so switching tabs
@@ -54,7 +54,7 @@ export function Btn({ children, onClick, color = C.blue, disabled, style, small 
       disabled={disabled}
       style={{
         background: disabled ? C.border : color,
-        color: "#fff", border: "none", borderRadius: 8,
+        color: buttonTextColor(disabled ? C.border : color), border: "none", borderRadius: 8,
         padding: small ? "6px 14px" : "10px 22px",
         fontSize: small ? 13 : 15, fontWeight: 600, fontFamily: "inherit", minHeight: 44,
         cursor: disabled ? "not-allowed" : "pointer",

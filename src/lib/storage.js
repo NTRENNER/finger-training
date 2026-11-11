@@ -462,6 +462,8 @@ export const LS_HISTORY_DOMAIN_KEY = "ft_history_domain";
 // removal alone — which is fine because they have no cloud presence
 // to be resurrected from.
 export const LS_REP_DELETED_KEY = "ft_rep_deleted";
+// Complete slot identities must survive row deletion until cloud acknowledgement.
+export const LS_REP_SLOT_DELETE_QUEUE_KEY = "ft_rep_slot_delete_queue";
 
 // (LS_TRAINING_FOCUS_KEY retired May 2026 with the Training Focus
 // feature itself. The "ft_training_focus" entries on existing devices

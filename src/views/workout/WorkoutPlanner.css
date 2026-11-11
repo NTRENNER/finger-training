@@ -1,3 +1,13 @@
+/* Keep logging controls tappable without enlarging the band color swatches. */
+.workout-log-row button,
+.workout-log-row input,
+.workout-log-row select {
+  min-height: 44px;
+}
+.workout-log-row button {
+  min-width: 44px;
+}
+
 .workout-choice-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

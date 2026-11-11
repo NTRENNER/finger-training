@@ -89,7 +89,7 @@ CREATE POLICY "auth_all" ON reps
               <button key={u} onClick={() => onUnitChange(u)} style={{
                 flex: 1, padding: "10px 0", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 16,
                 background: unit === u ? C.blue : C.border,
-                color: unit === u ? "#fff" : C.muted, border: "none",
+                color: unit === u ? C.bg : C.muted, border: "none",
               }}>{u}</button>
             ))}
           </div>
@@ -401,9 +401,6 @@ CREATE POLICY "auth_all" ON reps
             </p>
             <p>
               Connect from the training screen. Maintain the prescribed force until muscular failure; target time guides the load, not when to stop. Once you reach the target force, the rep ends when force drops below it. Overshooting remains usable data at the force you actually pull. Release once the rep ends. Use “Rep interrupted” during a rep if an unexpected interruption ends the effort.
-            </p>
-            <p style={{ marginBottom: 0 }}>
-              If readings seem off, your firmware may use a slightly different BLE packet format — contact support.
             </p>
           </div>
         </Sect>

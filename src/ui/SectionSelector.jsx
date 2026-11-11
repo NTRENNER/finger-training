@@ -11,7 +11,7 @@ export function SectionSelector({ label, options, value, onChange }) {
         <button key={key} type="button" aria-pressed={value === key}
           onClick={() => onChange(key)}
           style={{ background: value === key ? C.blue : C.bg,
-            color: value === key ? "#fff" : C.text,
+            color: value === key ? C.bg : C.text,
             borderColor: value === key ? C.blue : C.border }}>
           {text}
         </button>

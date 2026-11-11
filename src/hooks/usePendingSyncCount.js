@@ -7,6 +7,7 @@ import {
   LS_DAILY_STATE_DIRTY_KEY,
   LS_USER_SETTINGS_PATCH_KEY,
   LS_WORKOUT_DELETED_KEY,
+  LS_REP_SLOT_DELETE_QUEUE_KEY,
   LS_WORKOUT_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY,
   loadLS,
@@ -20,6 +21,7 @@ function listLength(value) {
 export function countPendingSyncChanges({
   repAdds,
   repUpdates,
+  repSlotDeletes,
   activityDirty,
   bodyWeightDirty,
   dailyStateDirty,
@@ -40,6 +42,7 @@ export function countPendingSyncChanges({
 
   return listLength(repAdds)
     + listLength(repUpdates)
+    + listLength(repSlotDeletes)
     + listLength(activityDirty)
     + listLength(bodyWeightDirty)
     + listLength(dailyStateDirty)
@@ -53,6 +56,7 @@ export function readPendingSyncCount() {
   return countPendingSyncChanges({
     repAdds: loadLS(LS_QUEUE_KEY),
     repUpdates: loadLS(LS_UPDATE_QUEUE_KEY),
+    repSlotDeletes: loadLS(LS_REP_SLOT_DELETE_QUEUE_KEY),
     activityDirty: loadLS(LS_ACTIVITY_DIRTY_KEY),
     bodyWeightDirty: loadLS(LS_BW_DIRTY_KEY),
     dailyStateDirty: loadLS(LS_DAILY_STATE_DIRTY_KEY),
@@ -66,6 +70,7 @@ export function readPendingSyncCount() {
 export function usePendingSyncCount() {
   const repAdds = useLSValue(LS_QUEUE_KEY);
   const repUpdates = useLSValue(LS_UPDATE_QUEUE_KEY);
+  const repSlotDeletes = useLSValue(LS_REP_SLOT_DELETE_QUEUE_KEY);
   const activityDirty = useLSValue(LS_ACTIVITY_DIRTY_KEY);
   const bodyWeightDirty = useLSValue(LS_BW_DIRTY_KEY);
   const dailyStateDirty = useLSValue(LS_DAILY_STATE_DIRTY_KEY);
@@ -77,6 +82,7 @@ export function usePendingSyncCount() {
   return useMemo(() => countPendingSyncChanges({
     repAdds,
     repUpdates,
+    repSlotDeletes,
     activityDirty,
     bodyWeightDirty,
     dailyStateDirty,
@@ -87,6 +93,7 @@ export function usePendingSyncCount() {
   }), [
     repAdds,
     repUpdates,
+    repSlotDeletes,
     activityDirty,
     bodyWeightDirty,
     dailyStateDirty,

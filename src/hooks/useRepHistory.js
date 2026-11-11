@@ -1,3 +1,4 @@
+import { enqueueRepSlotDeletions, flushRepSlotDeletions, pendingRepSlotDeletions } from '../lib/repSlotDeletionQueue.js';
 import { markWorkoutPending, syncWorkoutSessions } from '../lib/workoutSync.js';
 import { persistHistory } from '../lib/historyPersistence.js';
 // ─────────────────────────────────────────────────────────────
@@ -9,9 +10,8 @@ import { persistHistory } from '../lib/historyPersistence.js';
 //   * Cloud reconcile on sign-in: flush the offline retry queue,
 //     fetch the remote `reps` table, then push any local-only
 //     reps (sessions logged while signed out) before replacing
-//     state with the merged set. Skips replacing when Supabase
-//     returns no rows so a network hiccup or RLS-blocked JWT
-//     can't silently wipe the local cache.
+//     state with the merged set. Failed fetches leave local state
+//     intact; successful empty snapshots still preserve unsynced work.
 //   * `freshMap` / `threeExpPriors` — App-level memos that all
 //     three callers (Setup card prescription, Analysis chart,
 //     in-workout startSession) consume so the prescribed loads
@@ -23,12 +23,10 @@ import { persistHistory } from '../lib/historyPersistence.js';
 //     immediately and then mirrors the change to Supabase if the
 //     user is signed in. Failures are queued for the next sync.
 //
-// `replaceHistory` is exposed (not `setHistory`) for the manual
-// cloud-pull path so callers can't accidentally clobber history
-// without going through the same "only replace if remote returned
-// rows" guard that the auth-driven reconcile uses.
+// `refreshHistory` shares reconciliation with the manual cloud-pull
+// path, including deletion retries and pending edit overlays.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { supabase } from "../lib/supabase.js";
 import {
@@ -38,7 +36,7 @@ import {
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
   pushRepTombstones, fetchRepTombstoneIds, deleteRepsByIds,
-  pushRepSlotTombstones, fetchRepSlotTombstoneKeys,
+  repSlotKey, fetchRepSlotTombstoneKeys,
   fetchSessionTombstoneIds,
   enqueueRepUpdate, applyPendingUpdates, flushUpdateQueue,
   LS_QUEUE_KEY,
@@ -281,184 +279,192 @@ export function useRepHistory({
     if (!user) setHistorySynced(true);
   }, [user, syncSignal]);
 
-  // Cloud reconcile: runs when `user` flips from null → signed-in
-  // (and on every subsequent user change). The cancelled flag
-  // guards the multi-step async chain so tab-switch unmounts
-  // don't apply stale results.
-  useEffect(() => {
-    if (!user) return;
+  // Automatic and manual refresh use the same reconciliation. A newer
+  // request, local edit, or account change invalidates older responses before
+  // UI writes. A cloud snapshot must never overwrite work saved during IO.
+  const refreshGeneration = useRef(0);
+  const cancelRefresh = useCallback(() => { refreshGeneration.current++; }, []);
+  const refreshHistory = useCallback(async () => {
+    if (!user) return false;
+    const generation = ++refreshGeneration.current;
+    const cancelled = () => generation !== refreshGeneration.current;
     setHistorySynced(false);
-    let cancelled = false;
-    (async () => {
-      await flushQueue();
-      // Retry pending EDITS before fetching, so an edit made offline
-      // lands in cloud and the fetch below returns the edited row
-      // (instead of the stale one that applyPendingUpdates would
-      // then have to patch over).
-      await flushUpdateQueue();
-      if (cancelled) return;
+    await flushQueue();
+    // Retry pending EDITS before fetching, so an edit made offline
+    // lands in cloud and the fetch below returns the edited row
+    // (instead of the stale one that applyPendingUpdates would
+    // then have to patch over).
+    await flushUpdateQueue();
+    if (cancelled()) return false;
 
-      const remote = await fetchReps();
-      if (cancelled) return;
+    const remote = await fetchReps();
+    if (cancelled()) return false;
 
-      // Fetch all three tombstone tables. The set together blocks
-      // any flavor of resurrection:
-      //   id      — same-UUID re-push from same client
-      //   slot    — fresh-UUID re-push from old client (strips id)
-      //   session — re-push into a previously-tombstoned session_id,
-      //             even if the (set, rep, hand) slot wasn't explicitly
-      //             tombstoned at cleanup time
-      const [cloudTombstones, cloudSlotKeys, cloudSessionIds] = await Promise.all([
-        fetchRepTombstoneIds(),
-        fetchRepSlotTombstoneKeys(),
-        fetchSessionTombstoneIds(),
+    // Fetch all three tombstone tables. The set together blocks
+    // any flavor of resurrection:
+    //   id      — same-UUID re-push from same client
+    //   slot    — fresh-UUID re-push from old client (strips id)
+    //   session — re-push into a previously-tombstoned session_id,
+    //             even if the (set, rep, hand) slot wasn't explicitly
+    //             tombstoned at cleanup time
+    const [cloudTombstones, cloudSlotKeys, cloudSessionIds] = await Promise.all([
+      fetchRepTombstoneIds(),
+      fetchRepSlotTombstoneKeys(),
+      fetchSessionTombstoneIds(),
+    ]);
+    if (cancelled()) return false;
+    const slotTombSet    = new Set([...(cloudSlotKeys || []), ...pendingRepSlotDeletions().map(repSlotKey)]);
+    const sessionTombSet = new Set(cloudSessionIds  || []);
+
+    if (remote) {
+      // Reconcile local-only reps (offline sessions) up to the cloud.
+      // Tombstone filter: reps whose id is in EITHER the local
+      // LS_REP_DELETED_KEY OR the synced cloud rep_tombstones table
+      // were explicitly deleted somewhere — never re-upload them,
+      // even if they're "missing" from cloud. Without the cloud
+      // tombstones the per-device LS would let a delete on Device A
+      // get undone on Device B's next reconcile (May 2026
+      // resurrection bug).
+      const localReps = loadLS(LS_HISTORY_KEY) || [];
+      // Dedup against cloud on BOTH id (when available) AND the
+      // workout-slot composite key. The composite check is the
+      // critical one: a local rep with no id (legacy offline
+      // session, manually-added row) would otherwise NEVER match
+      // any cloud row by id, because the previous keyFor preferred
+      // id when present — so every cloud row keyed as `id:UUID`,
+      // local-no-id reps keyed as composites, and the two sets
+      // never collided. That mismatch was the duplicate-storm
+      // bug: local reps got re-pushed as fresh rows on every
+      // auth-flip → sign-in reconcile → repeat.
+      // Manual refresh uses this same reconciliation.
+      const remoteIds = new Set(remote.map(r => r.id).filter(Boolean));
+      const remoteCompositeKeys = new Set(remote.map(compositeKey));
+      // Union local + cloud tombstones. cloudTombstones is null when
+      // the fetch errored — in that case fall back to local-only
+      // (safer than silently re-pushing).
+      const tombstoned = new Set([
+        ...(loadLS(LS_REP_DELETED_KEY) || []),
+        ...(cloudTombstones || []),
       ]);
-      if (cancelled) return;
-      const slotTombSet    = new Set(cloudSlotKeys    || []);
-      const sessionTombSet = new Set(cloudSessionIds  || []);
-
-      if (remote) {
-        // Reconcile local-only reps (offline sessions) up to the cloud.
-        // Tombstone filter: reps whose id is in EITHER the local
-        // LS_REP_DELETED_KEY OR the synced cloud rep_tombstones table
-        // were explicitly deleted somewhere — never re-upload them,
-        // even if they're "missing" from cloud. Without the cloud
-        // tombstones the per-device LS would let a delete on Device A
-        // get undone on Device B's next reconcile (May 2026
-        // resurrection bug).
-        const localReps = loadLS(LS_HISTORY_KEY) || [];
-        // Dedup against cloud on BOTH id (when available) AND the
-        // workout-slot composite key. The composite check is the
-        // critical one: a local rep with no id (legacy offline
-        // session, manually-added row) would otherwise NEVER match
-        // any cloud row by id, because the previous keyFor preferred
-        // id when present — so every cloud row keyed as `id:UUID`,
-        // local-no-id reps keyed as composites, and the two sets
-        // never collided. That mismatch was the duplicate-storm
-        // bug: local reps got re-pushed as fresh rows on every
-        // auth-flip → sign-in reconcile → repeat.
-        // (Same fix mirrored in App.js's pullFromCloud.)
-        const remoteIds = new Set(remote.map(r => r.id).filter(Boolean));
-        const remoteCompositeKeys = new Set(remote.map(compositeKey));
-        // Union local + cloud tombstones. cloudTombstones is null when
-        // the fetch errored — in that case fall back to local-only
-        // (safer than silently re-pushing).
-        const tombstoned = new Set([
-          ...(loadLS(LS_REP_DELETED_KEY) || []),
-          ...(cloudTombstones || []),
-        ]);
-        // Mirror cloud tombstones into local LS so the per-device fast
-        // path stays in sync between reconciles (and so subsequent
-        // CRUD operations have the union without re-fetching).
-        if (cloudTombstones && cloudTombstones.length > 0) {
-          saveLS(LS_REP_DELETED_KEY, [...tombstoned]);
-        }
-        // Finish deletes that could not reach the cloud (made offline, or
-        // the request failed). deleteRep / deleteSession try the cloud
-        // once; this is the retry. Two leftovers are possible: the id
-        // tombstone never reached the cloud, and the row itself is still
-        // there. Both are safe to repeat, and a failure here is simply
-        // retried on the next reconcile because the local tombstone stays.
-        if (cloudTombstones) {
-          const inCloud = new Set(cloudTombstones);
-          const unsynced = (loadLS(LS_REP_DELETED_KEY) || []).filter(id => !inCloud.has(id));
-          if (unsynced.length > 0) await pushRepTombstones(unsynced);
-        }
-        const undeleted = remote.filter(r => r.id && tombstoned.has(r.id));
-        if (undeleted.length > 0) {
-          await deleteRepsByIds(undeleted.map(r => r.id));
-          await pushRepSlotTombstones(undeleted
-            .filter(r => r.session_id != null && r.set_num != null && r.rep_num != null && r.hand)
-            .map(r => ({ session_id: r.session_id, set_num: r.set_num, rep_num: r.rep_num, hand: r.hand })));
-        }
-        if (cancelled) return;
-
-        const toSync = localReps.filter(r =>
-          !(r.id && remoteIds.has(r.id)) &&
-          !remoteCompositeKeys.has(compositeKey(r)) &&
-          !(r.id && tombstoned.has(r.id)) &&
-          !slotTombSet.has(compositeKey(r)) &&
-          !(r.session_id && sessionTombSet.has(r.session_id))
-        );
-
-        let pushedAny = false;
-        const tombstonedIds = new Set();
-        for (const rep of toSync) {
-          const result = await pushRep(rep);
-          if (result === "ok") pushedAny = true;
-          else if (result === "error") enqueueReps([rep]);
-          else if (result === "tombstoned") tombstonedIds.add(rep.id);
-        }
-        if (cancelled) return;
-
-        // If we pushed offline reps, refetch so state includes them with
-        // proper server-assigned ids. Otherwise use the first fetch.
-        const cloudRepsRaw = pushedAny ? (await fetchReps()) : remote;
-        if (cancelled) return;
-        if (!cloudRepsRaw) return;
-
-        // Filter the FETCHED rows through the tombstone sets too. A
-        // rep whose cloud delete failed (offline at delete time) but
-        // whose tombstone push succeeded is still present in cloud —
-        // without this filter the reconcile re-added it to local
-        // history even though it's permanently dead (the trigger
-        // blocks re-inserts, not selects). Then overlay any pending
-        // local edits so a not-yet-synced edit isn't reverted by the
-        // wholesale setHistory below — the exact "fix a typo, lose it
-        // on next sign-in" failure the update queue exists for.
-        const cloudReps = applyPendingUpdates(cloudRepsRaw.filter(r =>
-          !(r.id && tombstoned.has(r.id)) &&
-          !slotTombSet.has(compositeKey(r)) &&
-          !(r.session_id && sessionTombSet.has(r.session_id))
-        ));
-
-        // MERGE, don't replace. Verify every toSync rep actually landed
-        // in cloud after the push round. Any that didn't are either:
-        //   (a) push-failed and already in the retry queue (network blip,
-        //       RLS error, etc.), or
-        //   (b) tombstone-rejected by the server trigger (rare race —
-        //       this device queued the rep before the tombstone synced).
-        // Preserve (a) so the user doesn't lose real data. Drop (b) by
-        // filtering out tombstonedIds — those reps are permanently dead
-        // on the server and re-queuing would loop forever.
-        const cloudIdSet = new Set(cloudReps.map(r => r.id).filter(Boolean));
-        const cloudSlotSet = new Set(cloudReps.map(compositeKey));
-        const preserved = toSync.filter(r =>
-          !(r.id && cloudIdSet.has(r.id)) &&
-          !cloudSlotSet.has(compositeKey(r)) &&
-          !(r.id && tombstonedIds.has(r.id))
-        );
-        if (preserved.length > 0) enqueueReps(preserved);
-
-        // Surface anything still in the retry queue that isn't already
-        // in cloud or in `preserved`. The retry queue (LS_QUEUE_KEY) is
-        // a separate stash from LS_HISTORY_KEY — if a prior reconcile
-        // wiped history while pushes were failing, the reps survived
-        // in the queue but became invisible to the History UI. Stitch
-        // them back so the user sees what they actually entered, even
-        // when it still can't sync. Recovery path for the May 19 2026
-        // missing-finger-workout case.
-        const queue = loadLS(LS_QUEUE_KEY) || [];
-        const preservedIdSet = new Set(preserved.map(r => r.id).filter(Boolean));
-        const preservedSlotSet = new Set(preserved.map(compositeKey));
-        const fromQueue = queue.filter(r =>
-          !(r.id && cloudIdSet.has(r.id)) &&
-          !cloudSlotSet.has(compositeKey(r)) &&
-          !(r.id && preservedIdSet.has(r.id)) &&
-          !preservedSlotSet.has(compositeKey(r))
-        );
-
-        const finalReps = [...cloudReps, ...preserved, ...fromQueue];
-        if (finalReps.length > 0) setHistory(finalReps);
-        // Reconcile landed with a real cloud snapshot — history now
-        // includes the cloud's reps. Safe for auto-pin writes.
-        setHistorySynced(true);
+      // Mirror cloud tombstones into local LS so the per-device fast
+      // path stays in sync between reconciles (and so subsequent
+      // CRUD operations have the union without re-fetching).
+      if (cloudTombstones && cloudTombstones.length > 0) {
+        saveLS(LS_REP_DELETED_KEY, [...tombstoned]);
       }
+      // Finish deletes that could not reach the cloud (made offline, or
+      // the request failed). deleteRep / deleteSession try the cloud
+      // once; this is the retry. Two leftovers are possible: the id
+      // tombstone never reached the cloud, and the row itself is still
+      // there. Both are safe to repeat, and a failure here is simply
+      // retried on the next reconcile because the local tombstone stays.
+      if (cloudTombstones) {
+        const inCloud = new Set(cloudTombstones);
+        const unsynced = (loadLS(LS_REP_DELETED_KEY) || []).filter(id => !inCloud.has(id));
+        if (unsynced.length > 0) await pushRepTombstones(unsynced);
+      }
+      const undeleted = remote.filter(r => r.id && (tombstoned.has(r.id) || slotTombSet.has(repSlotKey(r))));
+      if (undeleted.length > 0) {
+        enqueueRepSlotDeletions(undeleted);
+        for (const slot of pendingRepSlotDeletions()) slotTombSet.add(repSlotKey(slot));
+        await deleteRepsByIds(undeleted.map(r => r.id));
+      }
+      await flushRepSlotDeletions();
+      if (cancelled()) return false;
 
-    })();
-    return () => { cancelled = true; };
+      const toSync = localReps.filter(r =>
+        !(r.id && remoteIds.has(r.id)) &&
+        !remoteCompositeKeys.has(compositeKey(r)) &&
+        !(r.id && tombstoned.has(r.id)) &&
+        !slotTombSet.has(compositeKey(r)) &&
+        !(r.session_id && sessionTombSet.has(r.session_id))
+      );
 
-  }, [user, syncSignal]);
+      let pushedAny = false;
+      const tombstonedIds = new Set();
+      for (const rep of toSync) {
+        const result = await pushRep(rep);
+        if (result === "ok") pushedAny = true;
+        else if (result === "error") enqueueReps([rep]);
+        else if (result === "tombstoned") tombstonedIds.add(rep.id);
+      }
+      if (cancelled()) return false;
+
+      // If we pushed offline reps, refetch so state includes them with
+      // proper server-assigned ids. Otherwise use the first fetch.
+      const cloudRepsRaw = pushedAny ? (await fetchReps()) : remote;
+      if (cancelled()) return false;
+      if (!cloudRepsRaw) return false;
+
+      // Filter the FETCHED rows through the tombstone sets too. A
+      // rep whose cloud delete failed (offline at delete time) but
+      // whose tombstone push succeeded is still present in cloud —
+      // without this filter the reconcile re-added it to local
+      // history even though it's permanently dead (the trigger
+      // blocks re-inserts, not selects). Then overlay any pending
+      // local edits so a not-yet-synced edit isn't reverted by the
+      // wholesale setHistory below — the exact "fix a typo, lose it
+      // on next sign-in" failure the update queue exists for.
+      const cloudReps = applyPendingUpdates(cloudRepsRaw.filter(r =>
+        !(r.id && tombstoned.has(r.id)) &&
+        !slotTombSet.has(compositeKey(r)) &&
+        !(r.session_id && sessionTombSet.has(r.session_id))
+      ));
+
+      // MERGE, don't replace. Verify every toSync rep actually landed
+      // in cloud after the push round. Any that didn't are either:
+      //   (a) push-failed and already in the retry queue (network blip,
+      //       RLS error, etc.), or
+      //   (b) tombstone-rejected by the server trigger (rare race —
+      //       this device queued the rep before the tombstone synced).
+      // Preserve (a) so the user doesn't lose real data. Drop (b) by
+      // filtering out tombstonedIds — those reps are permanently dead
+      // on the server and re-queuing would loop forever.
+      const cloudIdSet = new Set(cloudReps.map(r => r.id).filter(Boolean));
+      const cloudSlotSet = new Set(cloudReps.map(compositeKey));
+      const preserved = toSync.filter(r =>
+        !(r.id && cloudIdSet.has(r.id)) &&
+        !cloudSlotSet.has(compositeKey(r)) &&
+        !(r.id && tombstonedIds.has(r.id))
+      );
+      if (preserved.length > 0) enqueueReps(preserved);
+
+      // Surface anything still in the retry queue that isn't already
+      // in cloud or in `preserved`. The retry queue (LS_QUEUE_KEY) is
+      // a separate stash from LS_HISTORY_KEY — if a prior reconcile
+      // wiped history while pushes were failing, the reps survived
+      // in the queue but became invisible to the History UI. Stitch
+      // them back so the user sees what they actually entered, even
+      // when it still can't sync. Recovery path for the May 19 2026
+      // missing-finger-workout case.
+      const queue = loadLS(LS_QUEUE_KEY) || [];
+      const preservedIdSet = new Set(preserved.map(r => r.id).filter(Boolean));
+      const preservedSlotSet = new Set(preserved.map(compositeKey));
+      const fromQueue = queue.filter(r =>
+        !(r.id && tombstoned.has(r.id)) &&
+        !slotTombSet.has(compositeKey(r)) &&
+        !(r.session_id && sessionTombSet.has(r.session_id)) &&
+        !(r.id && cloudIdSet.has(r.id)) &&
+        !cloudSlotSet.has(compositeKey(r)) &&
+        !(r.id && preservedIdSet.has(r.id)) &&
+        !preservedSlotSet.has(compositeKey(r))
+      );
+
+      const finalReps = [...cloudReps, ...preserved, ...fromQueue];
+      setHistory(finalReps);
+      // Reconcile landed with a real cloud snapshot — history now
+      // includes the cloud's reps. Safe for auto-pin writes.
+      setHistorySynced(true);
+      return true;
+    }
+
+    return false;
+  }, [user]);
+
+  useEffect(() => {
+    refreshHistory().catch(error => console.warn("Rep sync:", error?.message));
+    return cancelRefresh;
+  }, [refreshHistory, syncSignal, cancelRefresh]);
 
   // Refresh existing workouts as well as new ones. Pending edits stay local
   // until their exact contents have been acknowledged by the server.
@@ -480,6 +486,7 @@ export function useRepHistory({
   // recoverable on next reconcile.
 
   const addReps = useCallback((newReps) => {
+    cancelRefresh();
     // Stamp a client-generated UUID on any rep that doesn't already
     // carry one. The id is what makes pushRep idempotent (upsert
     // on conflict). Without this, every retry / reconcile / tab-
@@ -507,9 +514,10 @@ export function useRepHistory({
         });
       });
     }
-  }, [user]);
+  }, [user, cancelRefresh]);
 
   const updateSession = useCallback(async (sessionKey, updates) => {
+    cancelRefresh();
     // updates: { hand?, grip?, target_duration? }
     setHistory(h => h.map(r =>
       (r.session_id || r.date) === sessionKey ? { ...r, ...updates } : r
@@ -520,11 +528,12 @@ export function useRepHistory({
     // confirmed success.
     enqueueRepUpdate({ kind: "session", sessionKey, updates });
     if (user) await flushUpdateQueue();
-  }, [user]);
+  }, [user, cancelRefresh]);
 
   // Retrospective ratings are diary edits, not new load adjustments. Preserve
   // each rep's existing interpretation (including legacy estimates) atomically.
   const updateSessionCooked = useCallback(async (sessionKey, cooked) => {
+    cancelRefresh();
     const updatesByKey = new Map(history
       .filter(r => (r.session_id || r.date) === sessionKey)
       .map(r => [repMatchKey(r), { rep: r, updates: sessionRatingUpdates(r, cooked) }]));
@@ -538,10 +547,12 @@ export function useRepHistory({
       return edit ? { ...r, ...edit.updates } : r;
     }));
     if (user) await flushUpdateQueue();
-  }, [history, user]);
+  }, [history, user, cancelRefresh]);
 
   const deleteRep = useCallback(async (rep) => {
+    cancelRefresh();
     const k = repMatchKey(rep);
+    enqueueRepSlotDeletions([rep]);
     setHistory(h => h.filter(r => repMatchKey(r) !== k));
     // Tombstone the id so a future reconcile can't resurrect it from
     // a stale local cache or from another device's mirror. Both
@@ -554,23 +565,12 @@ export function useRepHistory({
         if (error) console.warn("Supabase deleteRep:", error.message);
         pushRepTombstones([rep.id]).catch(() => {});
       }
-      // Slot tombstone catches the case where an old-bundle browser
-      // re-pushes the same workout-slot with a fresh UUID (the id
-      // tombstone wouldn't match because the UUID is new). Server-
-      // side trigger then refuses the insert at the DB level.
-      if (rep.session_id != null && rep.set_num != null
-          && rep.rep_num != null && rep.hand) {
-        pushRepSlotTombstones([{
-          session_id: rep.session_id,
-          set_num:    rep.set_num,
-          rep_num:    rep.rep_num,
-          hand:       rep.hand,
-        }]).catch(() => {});
-      }
+      await flushRepSlotDeletions();
     }
-  }, [user]);
+  }, [user, cancelRefresh]);
 
   const updateRep = useCallback(async (rep, updates) => {
+    cancelRefresh();
     // HAND CHANGE = IDENTITY MOVE (2026-07 fix). `hand` is part of a
     // rep's cloud identity — the reps table's slot/conflict key is
     // (session_id, set_num, rep_num, hand), and the tombstone system
@@ -618,9 +618,10 @@ export function useRepHistory({
       enqueueRepUpdate({ kind: "rep", id: rep.id, updates });
       if (user) await flushUpdateQueue();
     }
-  }, [user, history, deleteRep, addReps]);
+  }, [user, history, deleteRep, addReps, cancelRefresh]);
 
   const deleteSession = useCallback(async (sessionKey) => {
+    cancelRefresh();
     // Capture removed reps outside setHistory so we can push their
     // ids AND workout-slot tuples to the cloud tombstone tables.
     // (setHistory's updater is called inside React's commit phase;
@@ -628,36 +629,28 @@ export function useRepHistory({
     const removedReps = (history || [])
       .filter(r => (r.session_id || r.date) === sessionKey);
     const removedIds = removedReps.map(r => r.id).filter(Boolean);
-    const removedSlots = removedReps
-      .filter(r => r.session_id != null && r.set_num != null
-                   && r.rep_num != null && r.hand)
-      .map(r => ({
-        session_id: r.session_id,
-        set_num:    r.set_num,
-        rep_num:    r.rep_num,
-        hand:       r.hand,
-      }));
-    setHistory(h => {
-      addRepTombstones(removedIds);
-      return h.filter(r => (r.session_id || r.date) !== sessionKey);
-    });
+    enqueueRepSlotDeletions(removedReps);
+    addRepTombstones(removedIds);
+    setHistory(h => h.filter(r => (r.session_id || r.date) !== sessionKey));
     if (user) {
       const { error } = await supabase.from("reps").delete()
         .or(`session_id.eq.${sessionKey},and(session_id.is.null,date.eq.${sessionKey})`);
       if (error) console.warn("Supabase delete:", error.message);
       // Both tombstone tables: id table catches same-UUID re-pushes,
-      // slot table catches fresh-UUID resurrection. Fire-and-forget.
+      // slot table catches fresh-UUID resurrection and has a durable retry queue.
       if (removedIds.length > 0)   pushRepTombstones(removedIds).catch(() => {});
-      if (removedSlots.length > 0) pushRepSlotTombstones(removedSlots).catch(() => {});
+      await flushRepSlotDeletions();
     }
-  }, [user, history]);
+  }, [user, history, cancelRefresh]);
 
-  // Bulk replace — used by the manual cloud-pull path. Same
-  // "only replace if you have rows" guard as the auth-driven
-  // reconcile so a hiccup can't wipe state.
+  // Bulk import helper. Cloud refresh goes through refreshHistory so it
+  // always reconciles tombstones and pending local work.
   const replaceHistory = useCallback((reps) => {
-    if (reps && reps.length > 0) setHistory(reps);
-  }, []);
+    if (reps && reps.length > 0) {
+      cancelRefresh();
+      setHistory(reps);
+    }
+  }, [cancelRefresh]);
 
   return {
     history: trainingHistory,
@@ -667,7 +660,7 @@ export function useRepHistory({
     persistenceStatus, retryPersistence,
     freshMap, freshMapFp, threeExpPriors,
     addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,
-    replaceHistory,
+    replaceHistory, refreshHistory,
     handleWorkoutSessionSaved,
   };
 }

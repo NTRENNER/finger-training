@@ -95,14 +95,21 @@ function BandPicker({ bands, label, onToggle }) {
             onClick={() => onToggle(band.key)}
             title={`${band.label}${active ? " (selected)" : ""} — tap to toggle`}
             style={{
-              width: 22, height: 22, borderRadius: "50%",
-              background: band.swatch, cursor: "pointer", padding: 0,
+              width: 44, height: 44, border: 0, borderRadius: 6,
+              background: "transparent", cursor: "pointer", padding: 11,
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <span aria-hidden="true" style={{
+              width: 22, height: 22, borderRadius: "50%", boxSizing: "border-box",
+              background: band.swatch,
               border: active ? "2px solid #fff" : `1px solid ${C.border}`,
               opacity: active ? 1 : 0.55,
               boxShadow: active ? "0 0 0 1px rgba(0,0,0,0.4)" : "none",
               flexShrink: 0,
-            }}
-          />
+            }} />
+          </button>
         );
       })}
     </span>
@@ -403,8 +410,8 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     return Object.fromEntries(timeKeys.map(key => [key, measuredSecondsOrBlank(prev[key]) || measuredSecondsOrBlank(ex.seconds)]));
   };
   const doneBtn = (isDone, onPress, title) => (
-    <button onClick={onPress} title={title} style={{
-      width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+    <button onClick={onPress} title={title} aria-label={`${ex.name}: ${title}`} aria-pressed={isDone} style={{
+      width: 44, height: 44, borderRadius: "50%", flexShrink: 0,
       background: isDone ? C.green : "transparent",
       border: `2px solid ${isDone ? C.green : C.border}`,
       color: isDone ? "#000" : C.muted,
@@ -424,7 +431,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
     // session is logged, but that first session still records reps.
     const showReps = !!ex.reps || ex.tracking === "reps" || ex.tracking === "time";
     return (
-      <div style={{
+      <div className="workout-log-row" style={{
         padding: "12px 0",
         borderBottom: last ? "none" : `1px solid ${C.border}`,
         opacity: allSetsDone ? 0.55 : 1,
@@ -456,7 +463,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
               {setsData.sets.map((s, i) => (
                 <React.Fragment key={i}>
                   <div style={{
-                    display: "flex", alignItems: "center", gap: 8, marginBottom: 6,
+                    display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 6,
                   }}>
                     <span style={{ fontSize: 12, color: C.muted, width: 36, flexShrink: 0 }}>
                       Set {i + 1}
@@ -465,6 +472,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       <input
                         ref={node => setRepInputRef(i, "reps", node)}
                         type="text" inputMode="numeric"
+                        aria-label={`${ex.name} set ${i + 1} reps`}
                         // Select-all on focus (June 2026): inputs arrive
                         // pre-filled with the recommendation, and on
                         // phones overriding meant tap → double-tap →
@@ -490,8 +498,10 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                     <button
                       onClick={() => toggleSetDone(i)}
                       title={`Set ${i + 1}: tap to toggle done`}
+                      aria-label={`${ex.name} set ${i + 1} completed`}
+                      aria-pressed={!!s.done}
                       style={{
-                        width: 32, height: 32, borderRadius: "50%",
+                        width: 44, height: 44, borderRadius: "50%",
                         background: s.done ? C.green : "transparent",
                         border: `2px solid ${s.done ? C.green : C.border}`,
                         color: s.done ? "#000" : C.muted,
@@ -535,7 +545,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
   }
 
   return (
-    <div style={{
+    <div className="workout-log-row" style={{
       padding: "12px 0",
       borderBottom: last ? "none" : `1px solid ${C.border}`,
       opacity: allSetsDone ? 0.55 : 1,
@@ -625,6 +635,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                     <input
                       ref={node => setRepInputRef(i, repsKey, node)}
                       type="text" inputMode="numeric"
+                      aria-label={`${ex.name} set ${i + 1}${sideWord ? ` ${sideWord}` : ""} reps`}
                       // Select-all on focus — see the bilateral reps
                       // input above for the mobile-override rationale.
                       onFocus={e => e.target.select()}
@@ -653,6 +664,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                         isn't a thing. */}
                     {ex.logVariant && (
                       <select
+                        aria-label={`${ex.name} set ${i + 1} variant`}
                         value={s.variant ?? ""}
                         onChange={e => {
                           const next = [...setsData.sets];
@@ -685,6 +697,7 @@ export function SessionExRow({ ex, unit, prevSets, setsData, onSetsChange, recom
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                         <input
                           type="number" inputMode="decimal"
+                          aria-label={`${ex.name} set ${i + 1}${sideWord ? ` ${sideWord}` : ""} weight (${unit})`}
                           // Select-all on focus — see the reps inputs
                           // above for the mobile-override rationale.
                           onFocus={e => e.target.select()}

@@ -116,3 +116,12 @@ test('a flush requested while one is running runs again afterwards', async () =>
   expect(calls).toBe(2);
   expect(loadLS(LS_UPDATE_QUEUE_KEY)).toEqual([]);
 });
+
+test('edits for explicitly deleted reps are terminal, without treating missing inserts as deleted', async () => {
+  const { LS_REP_DELETED_KEY } = require('../storage.js');
+  enqueueRepUpdate({ kind: 'rep', id: rep.id, updates: { actual_time_s: 31 } });
+  saveLS(LS_REP_DELETED_KEY, [rep.id]);
+  expect(await flushUpdateQueue()).toBe(1);
+  expect(loadLS(LS_UPDATE_QUEUE_KEY)).toEqual([]);
+  expect(queries.filter(q => q.patch)).toEqual([]);
+});

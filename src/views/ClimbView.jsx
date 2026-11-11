@@ -128,6 +128,7 @@ export function ClimbView({
   // climbing session. Self-contained (its own Connect Tindeq button).
   history = [],
   bodyWeight = null,
+  onBwSave = null,
   visible = true,
   tindeq = null,
   unit = "lbs",
@@ -144,6 +145,7 @@ export function ClimbView({
           updateRep={updateRep}
           history={history}
           bodyWeightKg={bodyWeight}
+          onBwSave={onBwSave}
           tindeq={tindeq}
           unit={unit}
           onClose={() => setWarmupActive(false)}

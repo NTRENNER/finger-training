@@ -33,7 +33,7 @@ import { AnalysisContainer } from "./views/AnalysisContainer.jsx";
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
   loadLS, saveLS, getStorageUserId,
-  LS_HISTORY_KEY, LS_REP_DELETED_KEY, LS_WORKOUT_PLAN_KEY,
+  LS_WORKOUT_PLAN_KEY,
 } from "./lib/storage.js";
 import { downloadCSV, downloadWorkoutCSV, downloadClimbingCSV } from "./lib/csv.js";
 import { useTindeq } from "./lib/tindeq.js";
@@ -62,8 +62,6 @@ import { useActivities } from "./hooks/useActivities.js";
 import { useConnectivity } from "./hooks/useConnectivity.js";
 import { usePendingSyncCount } from "./hooks/usePendingSyncCount.js";
 import {
-  pushRep, fetchReps, enqueueReps, flushQueue, LS_QUEUE_KEY,
-  fetchRepTombstoneIds, fetchRepSlotTombstoneKeys, fetchSessionTombstoneIds,
   deleteWorkoutSession,
 } from "./lib/sync.js";
 
@@ -283,7 +281,7 @@ export default function App() {
     persistenceStatus, retryPersistence,
     freshMap, threeExpPriors,
     addReps, updateRep, deleteRep, updateSession, updateSessionCooked, deleteSession,
-    replaceHistory,
+    refreshHistory,
     handleWorkoutSessionSaved,
   } = useRepHistory({ user, dailyState, syncSignal });
 
@@ -380,99 +378,7 @@ export default function App() {
     if (!user) return;
     setPullStatus("pulling");
     try {
-      await flushQueue();
-
-      // Reps — reconcile any local-only reps before overwriting state.
-      // Tombstone filter (LS_REP_DELETED_KEY) prevents re-uploading
-      // reps that were explicitly deleted on this device — see the
-      // matching logic + comment in src/hooks/useRepHistory.js's
-      // auth-driven reconcile.
-      const remoteReps = await fetchReps();
-      if (remoteReps) {
-        const localReps = loadLS(LS_HISTORY_KEY) || [];
-        // Dedup local-vs-cloud on BOTH id (when present) and the
-        // workout-slot composite key. The composite check catches
-        // local reps that pre-date the client-UUID era (when
-        // pushRep used .insert and stripped id, so the cloud
-        // assigned a fresh UUID the local rep never learned about).
-        // Without composite-key dedup, those legacy reps re-pushed
-        // on every reconcile and stacked duplicates — the May 2026
-        // duplicate-storm bug. Mirror of useRepHistory.js reconcile.
-        const compositeKey = r => `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
-        const remoteIds = new Set(remoteReps.map(r => r.id).filter(Boolean));
-        const remoteCompositeKeys = new Set(remoteReps.map(compositeKey));
-        // Pull all three tombstone tables in parallel. id catches
-        // same-UUID re-pushes, slot catches fresh-UUID re-pushes from
-        // old clients, session catches re-pushes into fully-tombstoned
-        // legacy sessions regardless of slot.
-        const [cloudTombstones, cloudSlotKeys, cloudSessionIds] = await Promise.all([
-          fetchRepTombstoneIds(),
-          fetchRepSlotTombstoneKeys(),
-          fetchSessionTombstoneIds(),
-        ]);
-        const tombstoned = new Set([
-          ...(loadLS(LS_REP_DELETED_KEY) || []),
-          ...(cloudTombstones || []),
-        ]);
-        const slotTombSet    = new Set(cloudSlotKeys    || []);
-        const sessionTombSet = new Set(cloudSessionIds  || []);
-        // Mirror cloud tombstones into local LS so subsequent
-        // CRUD operations on this device have the union without
-        // refetching.
-        if (cloudTombstones && cloudTombstones.length > 0) {
-          saveLS(LS_REP_DELETED_KEY, [...tombstoned]);
-        }
-        const toSync = localReps.filter(r =>
-          !(r.id && remoteIds.has(r.id)) &&
-          !remoteCompositeKeys.has(compositeKey(r)) &&
-          !(r.id && tombstoned.has(r.id)) &&
-          !slotTombSet.has(compositeKey(r)) &&
-          !(r.session_id && sessionTombSet.has(r.session_id))
-        );
-        let pushedAny = false;
-        for (const rep of toSync) {
-          const result = await pushRep(rep);
-          if (result === "ok") pushedAny = true;
-          else if (result === "error") enqueueReps([rep]);
-          // result === "tombstoned" → race against a tombstone we didn't
-          // see in our pre-fetched snapshot. Drop silently — don't enqueue
-          // (would loop forever) and don't preserve in local history (the
-          // rep is permanently dead on the server).
-        }
-        // MERGE, don't replace — see useRepHistory.js reconcile for the
-        // full rationale. Any toSync rep that didn't land in the refetched
-        // cloud (push-failed for transient reasons) gets preserved in local
-        // state so we don't discard real workout data. enqueueReps de-dupes
-        // by id, safe to call on already-queued reps.
-        const cloudReps = pushedAny ? (await fetchReps()) : remoteReps;
-        if (cloudReps) {
-          const cloudIdSet = new Set(cloudReps.map(r => r.id).filter(Boolean));
-          const cloudSlotSet = new Set(cloudReps.map(compositeKey));
-          const preserved = toSync.filter(r =>
-            !(r.id && cloudIdSet.has(r.id)) &&
-            !cloudSlotSet.has(compositeKey(r))
-          );
-          if (preserved.length > 0) enqueueReps(preserved);
-
-          // Surface anything still in the retry queue that isn't in cloud
-          // or in `preserved`. The queue is a separate LS stash from the
-          // history — if an earlier reconcile (pre-fix) wiped history while
-          // pushes were failing, the data survived in the queue but became
-          // invisible to the History UI. See useRepHistory.js for the
-          // matching recovery in the auth-flip path.
-          const queue = loadLS(LS_QUEUE_KEY) || [];
-          const preservedIdSet = new Set(preserved.map(r => r.id).filter(Boolean));
-          const preservedSlotSet = new Set(preserved.map(compositeKey));
-          const fromQueue = queue.filter(r =>
-            !(r.id && cloudIdSet.has(r.id)) &&
-            !cloudSlotSet.has(compositeKey(r)) &&
-            !(r.id && preservedIdSet.has(r.id)) &&
-            !preservedSlotSet.has(compositeKey(r))
-          );
-
-          replaceHistory([...cloudReps, ...preserved, ...fromQueue]);
-        }
-      }
+      if (!await refreshHistory()) throw new Error("Rep sync did not finish");
 
       if (!await syncWorkoutSessions(user.id)) {
         throw new Error("Workout sync is still pending");
@@ -484,7 +390,7 @@ export default function App() {
       console.warn("pullFromCloud failed:", e?.message);
       setPullStatus("err");
     }
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, refreshHistory]);
 
   // OTP send/verify/cancel + signOut are owned by useAuth() above.
 
@@ -799,6 +705,7 @@ export default function App() {
           onNavigateToHistory={() => setTab(4)}
           history={history}
           bodyWeight={bodyWeight}
+          onBwSave={saveBW}
           tindeq={tindeq}
           unit={unit}
           onTrainingStateChange={setClimbTrainingActive}

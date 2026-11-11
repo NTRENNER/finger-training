@@ -15,7 +15,7 @@ import { VideoLink } from "./VideoLink.jsx";
 
 export function SimpleExRow({ ex, done, notes, onToggle, onNotesChange, last }) {
   return (
-    <div style={{
+    <div className="workout-log-row" style={{
       padding: "12px 0",
       borderBottom: last ? "none" : `1px solid ${C.border}`,
       opacity: done ? 0.55 : 1,
@@ -34,18 +34,19 @@ export function SimpleExRow({ ex, done, notes, onToggle, onNotesChange, last }) 
             <div style={{ fontSize: 12, color: C.muted, marginTop: 4, lineHeight: 1.4 }}>{ex.intent}</div>
           ) : null}
           <input
+            aria-label={`${ex.name} notes`}
             value={notes || ""}
             onChange={e => onNotesChange?.(e.target.value)}
             placeholder="Notes (band, distance, weight…)"
             style={{
-              marginTop: 8, width: "100%",
+              marginTop: 8, width: "100%", boxSizing: "border-box",
               background: C.bg, border: `1px solid ${C.border}`,
               color: C.text, borderRadius: 6, padding: "5px 8px", fontSize: 12,
             }}
           />
         </div>
-        <button onClick={onToggle} style={{
-          width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+        <button onClick={onToggle} aria-label={`${ex.name} completed`} aria-pressed={!!done} style={{
+          width: 44, height: 44, borderRadius: "50%", flexShrink: 0,
           background: done ? C.green : "transparent",
           border: `2px solid ${done ? C.green : C.border}`,
           color: done ? "#000" : C.muted,

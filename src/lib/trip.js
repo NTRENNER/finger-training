@@ -8,8 +8,8 @@
 // impose linear Build/Push/Peak/Taper blocks since those don't fit
 // conjugate-style programming.
 
-// Default trip used when no user setting is stored.
-export const DEFAULT_TRIP = { date: "2026-08-22", name: "Tensleep" };
+// No trip until the user chooses one. Existing saved trips are preserved.
+export const DEFAULT_TRIP = { date: "", name: "" };
 
 // Parse a "YYYY-MM-DD" trip date string. Returns null for empty/invalid input.
 export function parseTripDate(tripDateStr) {

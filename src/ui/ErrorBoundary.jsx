@@ -61,7 +61,7 @@ export class ErrorBoundary extends React.Component {
           <button
             onClick={() => this.setState({ error: null })}
             style={{
-              background: C.blue, color: "#fff", border: "none",
+              background: C.blue, color: C.bg, border: "none",
               borderRadius: 8, padding: "10px 18px", fontSize: 14,
               fontWeight: 600, cursor: "pointer", marginRight: 10,
             }}>
@@ -124,11 +124,13 @@ export class CardBoundary extends React.Component {
   }
 }
 
-// Session-screen boundary. The running session (which set and rep, the
-// session id, the frozen plan) lives in App's hooks, above this boundary. A
-// throw in one session screen used to reach the app-root boundary, whose
-// recovery re-mounts App and so ended the session. Catching it here keeps
-// the session: "Try again" redraws the same screen at the same point.
+// Keep stateful session controllers ABOVE this boundary. The render callback
+// executes in a child, so both JSX evaluation and descendant errors are caught
+// without unmounting clocks, sensor callbacks, selected targets or Peak Test state.
+function SessionScreen({ render }) {
+  return render();
+}
+
 export class SessionBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -141,7 +143,8 @@ export class SessionBoundary extends React.Component {
     console.error("SessionBoundary caught:", error, info?.componentStack);
   }
   render() {
-    if (!this.state.error) return this.props.children;
+    if (!this.state.error) return this.props.render
+      ? <SessionScreen render={this.props.render} /> : this.props.children;
     return (
       <div role="alert" style={{
         background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
@@ -154,7 +157,7 @@ export class SessionBoundary extends React.Component {
         <button
           onClick={() => this.setState({ error: null })}
           style={{
-            background: C.blue, color: "#fff", border: "none", borderRadius: 8,
+            background: C.blue, color: C.bg, border: "none", borderRadius: 8,
             padding: "12px 20px", minHeight: 44, fontSize: 15, fontWeight: 600, cursor: "pointer",
           }}>
           Try again

@@ -33,3 +33,22 @@ test("a session screen error keeps the session position and recovers on Try agai
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(screen.getByText("Rep 4 screen")).toBeInTheDocument();
 });
+
+test('catches JSX evaluation errors below the session controller', () => {
+  let failRender = false;
+  function Controller() {
+    const [rep, setRep] = useState(3);
+    return <><button onClick={() => setRep(r => r + 1)}>advance</button>
+      <SessionBoundary render={() => {
+        if (failRender) throw new Error('bad computed display value');
+        return <span>Preserved rep {rep}</span>;
+      }} /></>;
+  }
+  render(<Controller />);
+  failRender = true;
+  fireEvent.click(screen.getByText('advance'));
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+  failRender = false;
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  expect(screen.getByText('Preserved rep 4')).toBeInTheDocument();
+});

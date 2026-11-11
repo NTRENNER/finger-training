@@ -76,7 +76,7 @@ test("a one-sided hold has seconds for each side", () => {
 test("a custom Reps × seconds exercise shows the seconds box beside its reps", () => {
   const ex = createCustomExercise({ name: "Plank", tracking: "time" });
   render(<StatefulRow ex={ex} initialSets={[{ reps: "", seconds: "", done: false }]} />);
-  fireEvent.change(screen.getByRole("textbox", { name: "" }), { target: { value: "2" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Plank set 1 reps" }), { target: { value: "2" } });
   fireEvent.change(screen.getByRole("textbox", { name: "Seconds for set 1" }), { target: { value: "30" } });
   fireEvent.click(screen.getByTitle("Set 1: tap to toggle done"));
   expect(state()[0]).toMatchObject({ reps: "2", seconds: "30", done: true });

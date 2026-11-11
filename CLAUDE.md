@@ -8,6 +8,11 @@ Changes to how the app measures, models or recommends training follow
 `docs/model-roadmap.md`: one layer at a time, leak-free evidence gates,
 versioned and reversible, decision logging before further model changes.
 
+The focused-training experiment is frozen through 2027-01-24. Preserve its
+measurement, model, prescription and progression rules, including failure
+detection. Report and defer changes to those rules until the owner explicitly
+reopens the protocol. UI and sync fixes must preserve the experimental rules.
+
 ## Find the cause before fixing
 
 When something misbehaves (a rep ended early, a number looks wrong):

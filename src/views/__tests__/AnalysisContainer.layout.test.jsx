@@ -43,6 +43,7 @@ test("all analysis tabs render in the same responsive content column", () => {
   ]) {
     fireEvent.click(screen.getByRole("button", { name: tab }));
     expect(within(content).getByText(view)).toBeInTheDocument();
+    expect(screen.queryByText("Weekly review") !== null).toBe(tab === "Fingers");
     expect(screen.getByTestId("analysis-content")).toBe(content);
   }
 });

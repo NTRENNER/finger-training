@@ -1,3 +1,4 @@
+import { SessionBoundary } from "../ui/ErrorBoundary.jsx";
 import { sustainedMaxKg } from '../model/sustainedMax.js';
 import { historicalForceRecords } from '../model/historicalForceRecords.js';
 import { buildPeakForceTrend } from '../model/peakForce.js';
@@ -164,7 +165,7 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
   const bestSustained = h => Math.max(0, ...state.rows.filter(r => r.hand === h).map(r => sustainedMaxKg(r) || 0));
   const best = h => Math.max(0, ...state.rows.filter(r => r.hand === h && isValidPeakMeasurement(r)).map(r => r.peak_force_kg));
 
-  return <div>
+  return <SessionBoundary render={() => <div>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
       <b>{grip} · Peak Test</b>
       {state.phase !== 'done' && <Btn small color={C.red} onClick={endEarly}>End test</Btn>}
@@ -218,5 +219,5 @@ export function PeakTestView({ grip, hand = 'Both', history = [], tindeq, addRep
         {state.rows.length > 0 && <p>Best so far · {context.hands.map(h => `${h}: ${best(h) ? fmtW(best(h), unit) + ' ' + unit : '—'}`).join(' · ')}</p>}
       </Card>
     </>}
-  </div>;
+  </div>} />;
 }
