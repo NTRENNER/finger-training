@@ -42,9 +42,10 @@ test('a fully elapsed rest advances once even with StrictMode effect replay',()=
 
 
 test('unknown release blocks advancement and starts full rest after the unloaded check',()=>{
- const done=jest.fn(),zero=jest.fn();
+ const done=jest.fn(),zero=jest.fn(),clock=jest.fn();
  const tindeq={connected:true,releaseCheckRequired:true,zeroing:false,zeroForNextRep:zero};
- const view=render(<RestView {...props} tindeq={tindeq} onRestDone={done}/>);
+ const view=render(<RestView {...props} tindeq={tindeq} onRestDone={done} onRestClockChange={clock}/>);
+ expect(clock).toHaveBeenLastCalledWith(null);
  expect(screen.getByText('Release check')).toBeInTheDocument();
  act(()=>jest.advanceTimersByTime(30000));
  expect(done).not.toHaveBeenCalled();
@@ -53,7 +54,8 @@ test('unknown release blocks advancement and starts full rest after the unloaded
  fireEvent.click(skip);
  fireEvent.click(screen.getByRole('button',{name:/handle unloaded/i}));
  expect(zero).toHaveBeenCalledTimes(1);
- view.rerender(<RestView {...props} tindeq={{...tindeq,releaseCheckRequired:false}} onRestDone={done}/>);
+ view.rerender(<RestView {...props} tindeq={{...tindeq,releaseCheckRequired:false}} onRestDone={done} onRestClockChange={clock}/>);
+ expect(clock).toHaveBeenLastCalledWith(Date.now());
  expect(screen.getByText('20s')).toBeInTheDocument();
  act(()=>jest.advanceTimersByTime(19000));
  expect(done).not.toHaveBeenCalled();

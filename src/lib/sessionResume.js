@@ -17,16 +17,19 @@
 import { loadLS, saveLS } from "./storage.js";
 
 export const LS_SESSION_RESUME_KEY = "ft_session_resume";
-export const SESSION_RESUME_VERSION = 1;
+// Version 1 discarded pending-redo identity and the within-set rest clock.
+// It cannot be resumed safely; completed history remains untouched.
+export const SESSION_RESUME_VERSION = 2;
 export const SESSION_RESUME_MAX_AGE_MS = 30 * 60 * 1000;
 
 // Phases a session can be picked up in. A rep in progress cannot be
-// recovered, so it and a finished rest both resume at "ready for the rep".
+// recovered, so it resumes at "ready for the rep". Rest keeps its wall-clock
+// origin; the existing rest view handles elapsed time and release checks.
 const RESUME_PHASE = {
   offset_prompt: "offset_prompt",
   rep_ready: "rep_ready",
   rep_active: "rep_ready",
-  resting: "rep_ready",
+  resting: "resting",
   switch_hands: "switch_hands",
   between_sets: "between_sets",
 };
@@ -54,6 +57,11 @@ export function saveSessionSnapshot(state, nowMs = Date.now()) {
     // reconnect it (a reload always drops the Bluetooth link).
     tindeq: state.tindeqConnected === true || state.tindeqWanted === true,
     repIds: state.sessionReps.map(r => r.id),
+    retryRecord: state.retryRecord ?? null,
+    retryTargetKg: state.retryTargetKg ?? null,
+    // The force recording already lives in history. Retain the UI result and
+    // its exact rest origin without duplicating that potentially large trace.
+    lastRepResult: state.lastRepResult ? { ...state.lastRepResult, forceRecording: undefined } : null,
     sessionAdjustment: state.sessionAdjustment ?? null,
     sessionPrescription: state.sessionPrescription ?? {},
     sessionDecision: state.sessionDecision ?? null,
@@ -85,5 +93,23 @@ export function readSessionSnapshot(history, { nowMs = Date.now(), todayYmd } = 
   const byId = new Map((history || []).map(r => [r.id, r]));
   const reps = snap.repIds.map(id => byId.get(id));
   if (reps.some(r => !r || r.session_id !== snap.sessionId)) { clearSessionSnapshot(); return null; }
-  return { ...snap, reps };
+  if (snap.retryRecord) {
+    const retry = snap.retryRecord;
+    const stored = byId.get(retry.id);
+    // Do not resurrect a deleted attempt, overwrite a completed retry, or
+    // attach the retry to a different slot after an edit on another device.
+    if (!stored || !stored.force_recording?.redo_pending || snap.repIds.includes(retry.id)
+        || stored.session_id !== snap.sessionId || retry.session_id !== snap.sessionId
+        || stored.set_num !== retry.set_num || stored.rep_num !== retry.rep_num || stored.hand !== retry.hand
+        || Number(retry.set_num) !== snap.currentSet || Number(retry.rep_num) !== snap.currentRep + 1
+        || retry.hand !== snap.activeHand) {
+      clearSessionSnapshot(); return null;
+    }
+  }
+  if (snap.phase === 'resting' && (!reps.length || !snap.lastRepResult
+      || !(snap.lastRepResult.restStartedAtMs === null || Number.isFinite(snap.lastRepResult.restStartedAtMs)))) {
+    clearSessionSnapshot(); return null;
+  }
+  return { ...snap, reps, lastRepResult: snap.lastRepResult
+    ? { ...snap.lastRepResult, forceRecording: reps.at(-1)?.force_recording } : null };
 }

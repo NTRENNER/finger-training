@@ -728,6 +728,13 @@ export function useSessionRunner({
     setPhase(tindeqConnected || mixed ? "rep_ready" : "rep_active");
   }, [tindeqConnected, mixed]);
 
+  // RestView may wait for an unloaded check before starting its clock.
+  // Persist that actual clock so reload cannot credit time spent blocked.
+  const handleRestClockChange = useCallback((startedAtMs) => {
+    setLastRepResult(result => !result || result.restStartedAtMs === startedAtMs
+      ? result : { ...result, restStartedAtMs: startedAtMs });
+  }, []);
+
   const handleSwitchHandsReady = useCallback(() => {
     if (phase !== 'switch_hands') return;
     if (currentSet > 1 && mixed && config.plannedSets <= 1) beginSetRest(activeHand);
@@ -781,6 +788,7 @@ export function useSessionRunner({
     const snap = readSessionSnapshot(history, { todayYmd: today() });
     if (!snap) return;
     const ids = new Set(snap.repIds);
+    if (snap.retryRecord) ids.add(snap.retryRecord.id);
     volumePlanRef.current = null;
     mixedModelsRef.current = {};
     predictionModelsRef.current = {};   // no leak-free rebuild is possible
@@ -790,7 +798,7 @@ export function useSessionRunner({
     lastActivityByHandRef.current = snap.lastActivityByHand || {};
     preSessionHistoryRef.current = history.filter(r => !ids.has(r.id));
     firstHandRef.current = snap.firstHand || snap.activeHand;
-    retryRecordRef.current = null;
+    retryRecordRef.current = snap.retryRecord ?? null;
     repDoneLockRef.current = false;
     setConfig(snap.config);
     setSessionId(snap.sessionId);
@@ -798,12 +806,12 @@ export function useSessionRunner({
     setSessionDate(snap.sessionDate);
     setRefWeights(snap.refWeights || {});
     setSessionReps(snap.reps);
-    setRetryTargetKg(null);
+    setRetryTargetKg(snap.retryTargetKg ?? null);
     setCurrentSet(snap.currentSet);
     setCurrentRep(snap.currentRep);
     setActiveHand(snap.activeHand);
     setManualOffset(snap.manualOffset === true);
-    setLastRepResult(null);
+    setLastRepResult(snap.lastRepResult ?? null);
     setLeveledUp(false);
     setAwards([]);
     if (snap.phase === 'between_sets' && snap.setRest) {
@@ -834,6 +842,7 @@ export function useSessionRunner({
     const saved = saveSessionSnapshot({
       phase, config, sessionId, sessionStartedAt, sessionDate, refWeights: baseRefWeights,
       currentSet, currentRep, activeHand, firstHand: firstHandRef.current, manualOffset, sessionReps,
+      retryRecord: retryRecordRef.current, retryTargetKg, lastRepResult,
       tindeqConnected, tindeqWanted: resumeWantsTindeq,
       sessionAdjustment: sessionAdjustmentRef.current, sessionPrescription: sessionPrescriptionRef.current,
       sessionDecision: sessionDecisionRef.current, lastActivityByHand: lastActivityByHandRef.current,
@@ -842,7 +851,7 @@ export function useSessionRunner({
     });
     if (!saved) clearSessionSnapshot();
   }, [phase, config, sessionId, sessionStartedAt, sessionDate, baseRefWeights, currentSet, currentRep,
-    activeHand, manualOffset, sessionReps, tindeqConnected, resumeWantsTindeq, setRestStartedAtMs, setRestSeconds, setOpeningRestS, setRestHand, setRestSource]);
+    activeHand, manualOffset, sessionReps, retryTargetKg, lastRepResult, tindeqConnected, resumeWantsTindeq, setRestStartedAtMs, setRestSeconds, setOpeningRestS, setRestHand, setRestSource]);
 
   // Normal sets retain their load; beta refWeights already points to the next hold.
   const nextWeight = useMemo(() => {
@@ -863,7 +872,7 @@ export function useSessionRunner({
     activeHand,
     nextWeight,
     startSession, chooseOffset, handleRepDone,
-    handleRestDone, handleNextSet, handleAbort,
+    handleRestDone, handleRestClockChange, handleNextSet, handleAbort,
     setRestStartedAtMs, setRestSeconds, setRestHand, setRestSource,
     handleSetRestDone, handleSwitchHandsReady,
     resumeWantsTindeq,

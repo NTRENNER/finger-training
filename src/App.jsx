@@ -335,7 +335,7 @@ export default function App() {
     activeHand,
     nextWeight,
     startSession, chooseOffset, handleRepDone,
-    handleRestDone, handleNextSet, handleAbort, handleSwitchHandsReady,
+    handleRestDone, handleRestClockChange, handleNextSet, handleAbort, handleSwitchHandsReady,
     setRestStartedAtMs, setRestSeconds, setRestHand, setRestSource, handleSetRestDone,
     resumeWantsTindeq,
   } = useSessionRunner({
@@ -679,6 +679,7 @@ export default function App() {
               nextAdjustment={activeRepConfig.mixedLoadAdjustment}
               restSeconds={config.restTime}
               onRestDone={handleRestDone}
+              onRestClockChange={handleRestClockChange}
               repNum={currentRep}
               repsPerSet={config.repsPerSet}
               unit={unit}

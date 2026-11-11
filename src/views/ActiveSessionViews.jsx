@@ -735,7 +735,7 @@ function playBeep(freq = 880, duration = 0.12, volume = 0.4) {
   } catch { /* audio not available */ }
 }
 
-export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustment = null, restSeconds, onRestDone, repNum, repsPerSet, unit = "lbs", tindeq = null, curveContext = null }) {
+export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustment = null, restSeconds, onRestDone, onRestClockChange, repNum, repsPerSet, unit = "lbs", tindeq = null, curveContext = null }) {
   // Wall-clock countdown, NOT tick-counted. The old version decremented
   // once per setInterval fire; background tabs / locked phones throttle
   // intervals to ≥1/min, so a 20s rest silently stretched to minutes —
@@ -763,11 +763,13 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
     if (releaseBlocked) {
       wasBlockedRef.current = true;
       setRemaining(restSeconds);
+      onRestClockChange?.(null);
       return;
     }
     // Release confirmation and rendering can take time. Credit that time;
     // the weaker pulling tail before physical release is never rest.
     deadlineRef.current = (wasBlockedRef.current ? Date.now() : restStartedAtMs) + restSeconds * 1000;
+    onRestClockChange?.(deadlineRef.current - restSeconds * 1000);
     wasBlockedRef.current = false;
     const tick = () => {
       const left = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
@@ -776,7 +778,7 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
     tick();
     if (!doneRef.current) intervalRef.current = setInterval(tick, 250);
     return () => clearInterval(intervalRef.current);
-  }, [restSeconds, restStartedAtMs, releaseBlocked]);
+  }, [restSeconds, restStartedAtMs, releaseBlocked, onRestClockChange]);
 
   useEffect(() => {
     if (releaseBlocked) return;
