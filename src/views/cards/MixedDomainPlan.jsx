@@ -8,15 +8,15 @@ export function MixedDomainPlan({ plan, sets = 1, readiness, hands, unit, multip
   const targetSeconds = (plan.steps.reduce((sum, step) => sum + step.targetTime, 0) + 4 * 30) * hands.length;
   const targetEstimate = `${Math.floor(targetSeconds / 60)}:${String(targetSeconds % 60).padStart(2, '0')}`;
   return <section aria-label="Chaos Machine beta plan" style={{ marginBottom: 20 }}>
-    <p style={{ fontSize: 16, lineHeight: 1.5 }}>Five holds per hand in each set. A different target weight each hold. Rest 30 seconds between holds.</p>
+    <p style={{ fontSize: 16, lineHeight: 1.5 }}>Five reps per hand in each set. A different target weight each rep. Rest 30 seconds between reps.</p>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>
-      Later target weights account for earlier pulls and rest, then stay fixed for each hold. Outside your measured duration range, the reduction is approximate.
+      Later target weights account for earlier pulls and rest, then stay fixed for each rep. Outside your measured duration range, the reduction is approximate.
       Incomplete measurements during this session can also prevent an adjustment.
     </p>
     {readiness?.status === 'ready' ? <p style={{ color: C.muted, lineHeight: 1.5 }}>
       Time per set if all targets are reached: {targetEstimate}{hands.length === 2 ? ' for both hands' : ' for one hand'}, including rests. Setup and hand changes add time.
     </p> : <p style={{ color: C.yellow, lineHeight: 1.5 }}>
-      {readiness?.status === 'partial' ? 'Some holds need more measured history.' : 'More measured history is needed for automatic adjustments.'}
+      {readiness?.status === 'partial' ? 'Some reps need more measured history.' : 'More measured history is needed for automatic adjustments.'}
       {' '}You can still train with the reference target weights. You may reach failure earlier than the displayed times, so session length will vary.
     </p>}
     {sets > 1 && <p style={{ color: C.muted }}>{sets} sets per hand selected. Each set repeats this sequence. Later sets account for earlier work and rest; they do not start fresh.</p>}
@@ -32,7 +32,7 @@ export function MixedDomainPlan({ plan, sets = 1, readiness, hands, unit, multip
     <div className="mixed-plan-hands" style={{ '--mixed-plan-columns': hands.length }}>
       {hands.map(hand => <div key={hand} style={{ minWidth: 0 }}>
         <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>{hand === 'L' ? 'Left hand' : 'Right hand'}</h3>
-        <ol className="mixed-plan-holds" aria-label={`${hand === 'L' ? 'Left' : 'Right'} hand holds`}>
+        <ol className="mixed-plan-holds" aria-label={`${hand === 'L' ? 'Left' : 'Right'} hand reps`}>
           {mixedDomainSteps(plan, hand).map((step, i) => {
             const domain = goalConfig[step.zone];
             return <li key={step.zone} className="mixed-plan-hold"
@@ -49,9 +49,9 @@ export function MixedDomainPlan({ plan, sets = 1, readiness, hands, unit, multip
                 {fmtW(step.loadByHand[hand] * multiplier, unit)} <span style={{ fontSize: 14 }}>{unit}</span>
               </strong>
               <div style={{ color: C.muted, fontSize: 12, marginTop: 6 }}>
-                {i === 0 ? 'First hold · Fresh reference' : readiness?.byHand?.[hand]?.[i]?.status === 'ready'
-                  ? 'Reference · adjustment estimated before this hold' : readiness?.byHand?.[hand]?.[i]?.status === 'limited'
-                    ? 'Reference · approximate reduction before this hold' : 'Reference target · adjustment unavailable'}
+                {i === 0 ? 'First rep · Fresh reference' : readiness?.byHand?.[hand]?.[i]?.status === 'ready'
+                  ? 'Reference · adjustment estimated before this rep' : readiness?.byHand?.[hand]?.[i]?.status === 'limited'
+                    ? 'Reference · approximate reduction before this rep' : 'Reference target · adjustment unavailable'}
               </div>
               {i > 0 && readiness?.byHand?.[hand]?.[i]?.status !== 'ready' && <p style={{ color: C.muted, fontSize: 12, margin: '6px 0 0' }}>
                 {readiness?.byHand?.[hand]?.[i]?.reason === 'outside_measured_duration_range'
@@ -63,7 +63,7 @@ export function MixedDomainPlan({ plan, sets = 1, readiness, hands, unit, multip
         </ol>
       </div>)}
     </div>
-    <p style={{ color: C.muted, lineHeight: 1.5 }}>{readiness?.status === 'ready' ? 'Adjusted targets aim for approximately the displayed times.' : 'The displayed times identify each domain; reference weights may not produce holds that long after earlier work.'} Keep your pulling force steady at the target weight and hold until failure; reaching the target does not stop the timer.</p>
-    <p style={{ color: C.muted, lineHeight: 1.5 }}>Only the first eligible measured hold per hand in set one can update the curve. Later holds are saved as fatigued work. These estimates are experimental. Your 4–6 rep progression is unchanged.</p>
+    <p style={{ color: C.muted, lineHeight: 1.5 }}>{readiness?.status === 'ready' ? 'Adjusted targets aim for approximately the displayed times.' : 'The displayed times identify each domain; reference weights may not produce reps that long after earlier work.'} Keep your pulling force steady at the target weight and rep until failure; reaching the target does not stop the timer.</p>
+    <p style={{ color: C.muted, lineHeight: 1.5 }}>Only the first eligible measured rep per hand in set one can update the curve. Later reps are saved as fatigued work. These estimates are experimental. Your 4–6 rep progression is unchanged.</p>
   </section>;
 }

@@ -85,15 +85,15 @@ function ExperimentReport({ experiment, history, activities, unit, onSave, ready
     <p style={{ color: C.muted, fontSize: 13 }}>{rests.length
       ? `Recorded rest before second sets: ${(rests.reduce((a, b) => a + b, 0) / rests.length).toFixed(0)} seconds on average across ${rests.length} hand transitions.`
       : 'No measured rest before second sets yet. Uncertain release times are kept separate from measured rest.'}</p>
-    <h3>Opening-hold comparison</h3>
-    <p style={{ color: C.muted }}>Your starting measurements are fixed from {experiment.baseline.windowStart} through {experiment.baseline.windowEnd}. Each comparison uses up to three training dates at a similar measured force (within 3%) and the same measurement method. Only eligible opening holds from the first session and first set count.</p>
+    <h3>Opening-rep comparison</h3>
+    <p style={{ color: C.muted }}>Your starting measurements are fixed from {experiment.baseline.windowStart} through {experiment.baseline.windowEnd}. Each comparison uses up to three training dates at a similar measured force (within 3%) and the same measurement method. Only eligible opening reps from the first session and first set count.</p>
     {comparison.byHand.map(row => <div key={`${row.grip}-${row.hand}`} style={{ borderTop: `1px solid ${C.border}`, padding: '14px 0' }}>
       <b>{row.grip} · {row.hand === 'L' ? 'Left' : 'Right'}</b>
       {row.status === 'baseline_missing' ? <p style={{ color: C.muted }}>No comparable historical starting measurement. This experiment cannot establish a before-and-after change for this hand; its recorded training remains available for review.</p>
         : <>
-          <p>Starting hold: {row.baseline.meanTimeS.toFixed(1)}s near {load(row.baseline.loadKg)} · {row.baseline.points.length} training {row.baseline.points.length === 1 ? 'date' : 'dates'}.</p>
-          {row.status === 'no_matches' ? <p style={{ color: C.muted }}>No matching opening holds from Volume Beta yet. Changes in load or measurement method can leave this comparison empty.</p>
-            : <p style={{ color: C.blue, fontWeight: 700 }}>Recent holds: {row.meanTimeS.toFixed(1)}s · {signed(row.changeSeconds)}s ({signed(row.changePercent)}%) · {row.points.length} training {row.points.length === 1 ? 'date' : 'dates'}.</p>}
+          <p>Starting hold time: {row.baseline.meanTimeS.toFixed(1)}s near {load(row.baseline.loadKg)} · {row.baseline.points.length} training {row.baseline.points.length === 1 ? 'date' : 'dates'}.</p>
+          {row.status === 'no_matches' ? <p style={{ color: C.muted }}>No matching opening reps from Volume Beta yet. Changes in load or measurement method can leave this comparison empty.</p>
+            : <p style={{ color: C.blue, fontWeight: 700 }}>Recent hold times: {row.meanTimeS.toFixed(1)}s · {signed(row.changeSeconds)}s ({signed(row.changePercent)}%) · {row.points.length} training {row.points.length === 1 ? 'date' : 'dates'}.</p>}
           {row.provisional && <p style={{ color: C.yellow, fontSize: 13 }}>Provisional: fewer than three comparable training dates in one or both periods.</p>}
           <details><summary style={{ cursor: 'pointer', color: C.muted }}>Measurements used</summary>
             {[['Starting', row.baseline.points], ['Recent', row.points]].map(([label, points]) => <div key={label}>
@@ -103,7 +103,7 @@ function ExperimentReport({ experiment, history, activities, unit, onSave, ready
           </details>
         </>}
     </div>)}
-    <p style={{ color: C.muted }}>This is a personal before-and-after pilot. Better holds alone cannot tell us whether the extra set helped: training frequency, climbing, travel and fatigue also matter. Review the added work and how you feel before deciding to keep it.</p>
+    <p style={{ color: C.muted }}>This is a personal before-and-after pilot. Better hold times alone cannot tell us whether the extra set helped: training frequency, climbing, travel and fatigue also matter. Review the added work and how you feel before deciding to keep it.</p>
     <details style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14, marginBottom: 18 }}>
       <summary style={{ cursor: 'pointer', fontWeight: 700 }}>Weekly check-in</summary>
       <label style={{ display: 'block', margin: '14px 0' }}>Review week

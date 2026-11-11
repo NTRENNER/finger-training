@@ -36,8 +36,8 @@ test("all analysis tabs render in the same responsive content column", () => {
   expect(within(content).getByText("Finger analysis")).toBeInTheDocument();
 
   for (const [tab, view] of [
-    ["Lifts", "Lift analysis"],
-    ["Climbs", "Climb analysis"],
+    ["Workout", "Lift analysis"],
+    ["Climb", "Climb analysis"],
     ["Weight", "Weight analysis"],
     ["Fingers", "Finger analysis"],
   ]) {

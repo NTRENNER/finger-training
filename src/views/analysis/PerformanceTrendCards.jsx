@@ -1,3 +1,4 @@
+import { fmtMonthDay } from "../../ui/format.js";
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ResponsiveContainer, ComposedChart, Bar, Scatter, XAxis, YAxis,
@@ -19,7 +20,7 @@ import {
 import './PerformanceTrendCards.css';
 
 const EMPTY = [];
-const fmtDate = timestamp => new Date(timestamp).toISOString().slice(5, 10);
+const fmtDate = timestamp => fmtMonthDay(new Date(timestamp).toISOString().slice(0, 10));
 const shortDomain = ([low, high]) => {
   const span = Math.max(5, Math.abs(low || 0), Math.abs(high || 0));
   return [-Math.ceil(span), Math.ceil(span)];
@@ -107,8 +108,8 @@ export function PerformanceTrendCards({
           </select>
         </label>
       </div>
-      <p className="trend-small" aria-live="polite">Showing {visibleObservations.length} of {inRangeObservations.length} comparable opening holds in this date range.</p>
-      {visibleObservations.length ? <div className="trend-chart trend-point-chart" role="img" aria-label="Individual opening holds compared with expected force, shown as unconnected points">
+      <p className="trend-small" aria-live="polite">Showing {visibleObservations.length} of {inRangeObservations.length} comparable opening reps in this date range.</p>
+      {visibleObservations.length ? <div className="trend-chart trend-point-chart" role="img" aria-label="Individual opening reps compared with expected force, shown as unconnected points">
         <ResponsiveContainer width="100%" height={CHART.height}>
           <ComposedChart data={visible} margin={CHART.margin}>
             <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
@@ -126,14 +127,14 @@ export function PerformanceTrendCards({
               line={false} shape={<PerformancePointGlyph />} isAnimationActive={false} />)}
           </ComposedChart>
         </ResponsiveContainer>
-        {selectedObservation && <div ref={popupRef} className="trend-point-popup" role="dialog" aria-label="Opening hold details">
+        {selectedObservation && <div ref={popupRef} className="trend-point-popup" role="dialog" aria-label="Opening rep details">
           <button type="button" className="trend-point-popup-close" aria-label="Close point details"
             onClick={() => setSelectedObservationId(null)}>×</button>
           <PerformanceObservationDetails observation={selectedObservation} unit={unit} />
         </div>}
       </div> : <p className="trend-small">{inRangeObservations.length
-        ? 'No opening holds match these filters. Try another duration or session order.'
-        : 'No comparable opening holds in this date range.'}</p>}
+        ? 'No opening reps match these filters. Try another duration or session order.'
+        : 'No comparable opening reps in this date range.'}</p>}
       <PerformancePointLegend grips={selectedGrips} />
     </Card>
   </section>;

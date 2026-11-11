@@ -39,7 +39,7 @@ import {
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.jsx";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
-import { bwOnDate, fmt1, fmtW, toDisp } from "../../ui/format.js";
+import { bwOnDate, fmt1, fmtDay, fmtW, toDisp } from "../../ui/format.js";
 import { ZONE6, ZONE_REF_T } from "../../model/zones.js";
 import {
   buildGripImprovement,
@@ -187,7 +187,7 @@ function measuredComparisonLabel(comparison, unit) {
       : fmt1(comparison.anchorDurationS);
     return `Matched duration · ~${duration}s`;
   }
-  return "Opening hold · measured";
+  return "Opening rep · measured";
 }
 
 function measuredItemForZone(progress, zoneKey) {
@@ -331,7 +331,7 @@ function ImprovementRow({
             </>
           ) : measured?.sessions > 0 ? (
             <>
-              <span className="curve-improvement-measured-label">Opening hold · measured</span>
+              <span className="curve-improvement-measured-label">Opening rep · measured</span>
               <span className="curve-improvement-measured-empty">No like-for-like repeat yet</span>
             </>
           ) : <span className="curve-improvement-measured-empty">No measured opening yet</span>;
@@ -343,8 +343,8 @@ function ImprovementRow({
               : estimatedFallback
                 ? `Calibrated curve estimate at ${estimatedFallback.duration} seconds; no like-for-like measured repeat yet`
               : measured?.sessions > 0
-                ? "No later opening matches the first hold closely enough in force or duration"
-                : "No qualifying measured opening holds yet";
+                ? "No later opening matches the first rep closely enough in force or duration"
+                : "No qualifying measured opening reps yet";
 
           return (
             <div key={z.key}
@@ -478,7 +478,7 @@ function OverlayChart({
         <Tooltip content={<CurveTooltip activeDot={activeDot}
           format={val => `${normalizeOn ? Number(val).toFixed(2) : fmt1(val)} ${displayUnit}`} />} />
         <Line dataKey="past" stroke={C.muted} strokeWidth={2} strokeDasharray="6 4"
-          dot={false} connectNulls name={`Baseline (${baselineDate})`} isAnimationActive={false} />
+          dot={false} connectNulls name={`Baseline (${fmtDay(baselineDate)})`} isAnimationActive={false} />
         <Line dataKey="now" stroke={color} strokeWidth={3}
           dot={false} connectNulls name={`Now (${nowDate})`} isAnimationActive={false} />
         {/* The reps behind each curve: grip-coloured for those since the
@@ -553,7 +553,7 @@ function GripBlock({
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color }}>{grip}</div>
-        <div style={{ fontSize: 11, color: C.muted }}>{overlay.baselineDate || staticImprovement?.baselineDate ? `since ${overlay.baselineDate || staticImprovement.baselineDate}` : ""}</div>
+        <div style={{ fontSize: 11, color: C.muted }}>{overlay.baselineDate || staticImprovement?.baselineDate ? `since ${fmtDay(overlay.baselineDate || staticImprovement.baselineDate)}` : ""}</div>
       </div>
 
       {transition && <p style={{fontSize:13,color:C.muted}}>
@@ -605,7 +605,7 @@ function GripBlock({
           covered exactly the curve they were trying to watch move. */}
       {!staticImprovement && <div style={{ margin: "8px 0 0" }}>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color, marginBottom: 4 }}>
-          <span>Now: <b>{nowDate}</b></span>
+          <span>Now: <b>{fmtDay(nowDate)}</b></span>
           <span style={{ color: C.muted }}>{idx + 1} of {dates.length} session{dates.length === 1 ? "" : "s"} since baseline</span>
         </div>
         <HistorySlider endLabel={`${grip} comparison date`} endText={nowDate}
@@ -966,7 +966,7 @@ export function CurveImprovementCard({
         <>
           {global3xBaseline && (
             <div style={{ fontSize: 11, color: C.muted, marginBottom: 8, textAlign: "right" }}>
-              since {global3xBaseline.date}
+              since {fmtDay(global3xBaseline.date)}
             </div>
           )}
           <StaticGripTiles

@@ -77,7 +77,7 @@ test("lower-bound stage uses the four-rep recovery protocol and defers the middl
   const { onApplyPlan } = renderCard(history);
 
   expect(screen.getAllByText("after lower anchor")).toHaveLength(4);
-  expect(document.body).toHaveTextContent("Hangs4");
+  expect(document.body).toHaveTextContent("Reps4");
   expect(document.body).toHaveTextContent("Rest20s");
 
   await waitFor(() => expect(onApplyPlan).toHaveBeenCalled());

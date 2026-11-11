@@ -31,7 +31,7 @@ import {
   loadLS, saveLS, LS_WORKOUT_LOG_KEY, LS_WORKOUT_PLAN_KEY, LS_BW_LOG_KEY, LS_BW_NORMALIZE_KEY,
   ROTATION_PIN_KEY,
 } from "../lib/storage.js";
-import { bwOnDate, toDisp } from "../ui/format.js";
+import { bwOnDate, toDisp, fmtMonthDay, fmtDay } from "../ui/format.js";
 import { migrateExerciseId, buildExerciseDefIndex } from "../model/exerciseIds.js";
 import { exercises as SUPPORT_EXERCISES } from "../model/supportTraining.js";
 import {
@@ -163,8 +163,8 @@ function RepsExerciseCard({ ex, series, setupLabel }) {
           {measured.length > 1 && (
             <div style={{ fontSize: 11, color: ladderMoved || dReps > 0 ? C.green : dReps < 0 ? C.red : C.muted }}>
               {ladderMoved
-                ? `${first.variant} → ${last.variant} since ${first.date}`
-                : `${dReps > 0 ? "+" : ""}${dReps} ${valueUnit} since ${first.date}`}
+                ? `${first.variant} → ${last.variant} since ${fmtDay(first.date)}`
+                : `${dReps > 0 ? "+" : ""}${dReps} ${valueUnit} since ${fmtDay(first.date)}`}
             </div>
           )}
         </div>
@@ -178,7 +178,7 @@ function RepsExerciseCard({ ex, series, setupLabel }) {
               dataKey="date"
               stroke={C.muted}
               tick={CHART.tick}
-              tickFormatter={(d) => d?.slice(5) || ""}
+              tickFormatter={(d) => fmtMonthDay(d)}
             />
             <YAxis
               stroke={C.purple}
@@ -274,7 +274,7 @@ function ExerciseCard({ ex, series, unit, normalizeOn, setupLabel }) {
           </div>
           {sessionCount > 1 && (
             <div style={{ fontSize: 11, color: dTop > 0 ? C.green : dTop < 0 ? C.red : C.muted }}>
-              {dTop > 0 ? "+" : ""}{fmt(dTop)} {dispUnit} since {first.date}
+              {dTop > 0 ? "+" : ""}{fmt(dTop)} {dispUnit} since {fmtDay(first.date)}
             </div>
           )}
         </div>
@@ -288,7 +288,7 @@ function ExerciseCard({ ex, series, unit, normalizeOn, setupLabel }) {
               dataKey="date"
               stroke={C.muted}
               tick={CHART.tick}
-              tickFormatter={(d) => d?.slice(5) || ""}  // MM-DD
+              tickFormatter={(d) => fmtMonthDay(d)}  // MM-DD
             />
             <YAxis
               yAxisId="left"

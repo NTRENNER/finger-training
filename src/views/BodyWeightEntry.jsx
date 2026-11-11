@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { C } from "../ui/theme.js";
-import { fmt1, toDisp, fromDisp } from "../ui/format.js";
+import { fmt1, toDisp, fromDisp, fmtDay } from "../ui/format.js";
 import { today } from "../util.js";
 import { useLSValue } from "../hooks/useLSValue.js";
 import { saveLS, LS_BW_LOG_KEY, LS_BW_REMINDER_DISMISSED_KEY } from "../lib/storage.js";
@@ -66,7 +66,7 @@ export function BodyWeightEntry({ unit = "lbs", entry = null, latest = null, ini
           {reminder ? "Update your body weight" : entry ? "Edit weight" : "Log weight"}
         </h2>
         <p style={{ color: C.muted, fontSize: 15, lineHeight: 1.5, margin: "0 0 20px" }}>
-          {latest ? <>Last recorded: <strong style={{ color: C.text }}>{fmt1(toDisp(latest.kg, unit))} {unit}</strong> on {latest.date}.</> : initialKg > 0 ? "Confirm your weight and the date below." : "Add your first body-weight entry."}
+          {latest ? <>Last recorded: <strong style={{ color: C.text }}>{fmt1(toDisp(latest.kg, unit))} {unit}</strong> on {fmtDay(latest.date)}.</> : initialKg > 0 ? "Confirm your weight and the date below." : "Add your first body-weight entry."}
           {reminder && <> A weekly update keeps relative-strength tracking useful.</>}
         </p>
         {!reminder && <label className="body-weight-field">
@@ -80,7 +80,7 @@ export function BodyWeightEntry({ unit = "lbs", entry = null, latest = null, ini
             value={value} onChange={event => { setValue(event.target.value); setError(""); }} />
         </label>
         {!reminder && !entry && existing && <p style={{ color: C.muted, fontSize: 13 }}>
-          Saving will update the existing entry for {date}.
+          Saving will update the existing entry for {fmtDay(date)}.
         </p>}
         {error && <p role="alert" style={{ color: C.red }}>{error}</p>}
         <div className="body-weight-actions">

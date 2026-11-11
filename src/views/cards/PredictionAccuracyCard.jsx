@@ -13,7 +13,7 @@ function Score({ title, score, unit, factor = 1, candidateLabel = 'Candidate' })
   const fmt = n => n == null ? '—' : `${(n * factor).toFixed(1)} ${unit}`;
   return <section style={{ marginTop: 20 }}>
     <h4 style={{ margin: '0 0 8px' }}>{title}</h4>
-    <div style={{ color: C.muted, marginBottom: 8 }}>{score.current.days} training days · {score.current.observations} holds</div>
+    <div style={{ color: C.muted, marginBottom: 8 }}>{score.current.days} training days · {score.current.observations} reps</div>
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', minWidth: 340, textAlign: 'left', fontSize: 14, borderCollapse: 'collapse' }}>
         <thead><tr><th scope="col">Error</th><th scope="col">Current</th>{candidateLabel && <th scope="col">{candidateLabel}</th>}</tr></thead>
@@ -39,13 +39,13 @@ function DiagnosticBreakdowns({ report, unit, factor }) {
       <option value="plannedForce">Opening hold time · planned load</option>
       <option value="adaptiveForce">Established + recent · opening force</option>
       <option value="adaptivePlanned">Established + recent · hold time</option>
-      <option value="recovery">Later holds · measured rest</option>
-      <option value="plannedRecovery">Later holds · updated after opener</option>
-      <option value="preSessionRecovery">Later holds · before opener</option>
+      <option value="recovery">Later reps · measured rest</option>
+      <option value="plannedRecovery">Later reps · updated after opener</option>
+      <option value="preSessionRecovery">Later reps · before opener</option>
     </select>
     <label htmlFor={`${id}-group`}>Group by</label>
     <select id={`${id}-group`} style={{ display: "block", width: "100%", margin: "6px 0 12px" }} value={dimension} onChange={e => setDimension(e.target.value)}>
-      {Object.entries({ rep: 'Hold number', domain: 'Planned domain', grip: 'Device', hand: 'Hand',
+      {Object.entries({ rep: 'Rep number', domain: 'Planned domain', grip: 'Device', hand: 'Hand',
         trainingContext: 'Earlier finger training that day', restBand: 'Rest duration', basis: 'Recording method', priorDaysBand: 'Prior training days' })
         .map(([value, label]) => <option key={value} value={value}>{label}</option>)}
     </select>
@@ -65,7 +65,7 @@ function PrescriptionStages({ rows, unit, factor }) {
       These are separate calculations; the experimental estimate does not set your load.</p>
     {!rows.length ? <p>No comparable saved opening forecasts yet.</p> : <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', minWidth: 580, textAlign: 'left', fontSize: 13, borderSpacing: 8 }}>
-        <caption style={{ textAlign: 'left' }}>Latest 20 opening holds · {unit}</caption>
+        <caption style={{ textAlign: 'left' }}>Latest 20 opening reps · {unit}</caption>
         <thead><tr>{['Workout', 'Target', 'Established', 'Recent change', 'Candidate after limits', 'Final planned']
           .map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
         <tbody>{rows.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20).map(row =>
@@ -93,8 +93,8 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
   return <Card>
     <h3 style={{ margin: '0 0 10px' }}>Prediction accuracy</h3>
     <HistoricalPredictionReview history={history} unit={unit} />
-    <p style={{ color: C.muted, lineHeight: 1.5 }}><strong>Review rule:</strong> compare opening holds,
-      later-hold recovery, and Chaos target times separately. Check each grip and duration, large misses,
+    <p style={{ color: C.muted, lineHeight: 1.5 }}><strong>Review rule:</strong> compare opening reps,
+      later-rep recovery, and Chaos target times separately. Check each grip and duration, large misses,
       training order, and new independent days. A checkpoint invites review; it never switches a model automatically.</p>
     <ChaosPredictionReview history={history} />
     <strong>New saved forecasts</strong>
@@ -104,20 +104,20 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
     </div>
     <p style={{ color: C.muted, lineHeight: 1.5 }}>
       {report.days < REVIEW_DAYS
-        ? 'During standard sessions, we save estimates before your holds and check them against your results. The first new-data checkpoint is after 10 days with comparable opening holds.'
-        : `${report.days} days with comparable opening holds. Review checkpoint ${report.checkpoints} reached; the next is in ${report.daysToNextCheckpoint} more training days.`}
+        ? 'During standard sessions, we save estimates before your reps and check them against your results. The first new-data checkpoint is after 10 days with comparable opening reps.'
+        : `${report.days} days with comparable opening reps. Review checkpoint ${report.checkpoints} reached; the next is in ${report.daysToNextCheckpoint} more training days.`}
     </p>
     <div style={{ color: C.muted, fontSize: 13 }}>All grips and both hands · Each day counts once · Recommendations stay unchanged</div>
     <details style={{ marginTop: 14 }}>
       <summary style={{ cursor: 'pointer', padding: '8px 0' }}>See the comparison</summary>
-      <p style={{ color: C.muted, lineHeight: 1.5 }}>The current curve already uses eligible opening holds. Its former opening-only competitor is retired because it became the same model.
+      <p style={{ color: C.muted, lineHeight: 1.5 }}>The current curve already uses eligible opening reps. Its former opening-only competitor is retired because it became the same model.
         The distinct established-ability + recent-performance comparison below remains experimental. A review checks each grip and duration before any change is made.</p>
       <p style={{ color: C.muted, fontSize: 13 }}>These checks cover standard single-domain sessions. Chaos Machine (Beta) and peak tests use separate measurements.</p>
-      {!report.days && <p>No comparable opening holds saved yet. Recording starts with new standard sessions;
+      {!report.days && <p>No comparable opening reps saved yet. Recording starts with new standard sessions;
         older workouts still train the models. Each curve needs at least five prior training days.</p>}
       <Score title="Force at the time you held" score={report.force} candidateLabel={null} unit={unit} factor={factor} />
       <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>This checks the saved curves at your eventual hold duration, including valid overshoots.
-        It is a comparison after the hold, not an advance prediction of its duration.</p>
+        It is a comparison after the rep, not an advance prediction of its duration.</p>
       {report.days >= REVIEW_DAYS && <Score title="Most recent 10 training days" score={report.lastTenDays} candidateLabel={null} unit={unit} factor={factor} />}
       {Object.entries(report.byGrip).map(([grip, score]) => <Score key={grip} title={grip} score={score} candidateLabel={null} unit={unit} factor={factor} />)}
       <details style={{ marginTop: 16 }}><summary style={{ cursor: 'pointer' }}>By planned domain</summary>
@@ -125,7 +125,7 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
         <p style={{ color: C.muted, fontSize: 13 }}>Grouped by the planned session. The review download also separates the durations actually held.</p>
       </details>
       <Score title="Advance hold-time estimates" score={report.plannedForce} candidateLabel={null} unit="s" />
-      <p style={{ color: C.muted, fontSize: 13 }}>Only holds within 10% of the planned force enter this check.
+      <p style={{ color: C.muted, fontSize: 13 }}>Only reps within 10% of the planned force enter this check.
         These estimates use the capacity curves; load limits and the rep ladder are separate.</p>
       <details style={{ marginTop: 16 }}>
         <summary style={{ cursor: 'pointer' }}>Established ability + recent performance</summary>
@@ -143,19 +143,19 @@ export function PredictionAccuracyCard({ history, unit = 'lbs' }) {
           in the download. Each grip and duration needs review before changing recommendations.</p>
       </details>
       <Score title="Between-rep recovery · approximate" score={report.recovery} unit="s" candidateLabel="Population" />
-      <p style={{ color: C.muted, fontSize: 13 }}>Current recovery versus the population estimate, checked using measured rest and similar force across holds.</p>
-      <Score title="Later-hold estimates updated after the opener" score={report.plannedRecovery} unit="s" candidateLabel="Population" />
-      <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>These estimates already know your opening hold. This check also requires rest within 2 seconds of the plan.
+      <p style={{ color: C.muted, fontSize: 13 }}>Current recovery versus the population estimate, checked using measured rest and similar force across reps.</p>
+      <Score title="Later-rep estimates updated after the opener" score={report.plannedRecovery} unit="s" candidateLabel="Population" />
+      <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>These estimates already know your opening rep. This check also requires rest within 2 seconds of the plan.
         Lower error is better. Positive bias means overestimating; negative means underestimating.
         “Typical” is mean absolute error; “Larger misses” is root mean square error. A small sample cannot establish a winner.</p>
-      <Score title="Later-hold estimates before the opener" score={report.preSessionRecovery} unit="s" candidateLabel="Population" />
+      <Score title="Later-rep estimates before the opener" score={report.preSessionRecovery} unit="s" candidateLabel="Population" />
       <p style={{ color: C.muted, fontSize: 13 }}>These use the saved capacity curve and planned rest without your opening result.
-        Every preceding hold must match the planned load and rest, with a compatible recording method.
+        Every preceding rep must match the planned load and rest, with a compatible recording method.
         Older records without this forecast are not reconstructed as advance predictions.</p>
       <DiagnosticBreakdowns report={report} unit={unit} factor={factor} />
       <PrescriptionStages rows={report.prescriptionStages} unit={unit} factor={factor} />
       {excluded > 0 && <p style={{ color: C.muted, fontSize: 13 }}>{excluded} saved checks are not comparable yet or were excluded.
-        Interrupted holds, changed records and incomplete measurements do not count against either model. Reasons are included in the download.</p>}
+        Interrupted reps, changed records and incomplete measurements do not count against either model. Reasons are included in the download.</p>}
       <Btn onClick={exportReport}>Download review</Btn>
       <p style={{ color: C.muted, fontSize: 13 }}>At each checkpoint, ask for a prediction review and share this download.
         It includes frozen forecasts, results and separate scores for each grip and domain.</p>

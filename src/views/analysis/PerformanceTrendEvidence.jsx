@@ -63,7 +63,7 @@ export function PerformanceObservationDetails({ observation, unit = 'kg' }) {
   const { date, grip, hand, force, expectedForce, duration, deviation, context,
     expectationBasis, plannedLoad, plannedDuration } = observation;
   const percent = formatTrendPercent(deviation);
-  return <section className="trend-point-details" aria-label="Selected opening hold">
+  return <section className="trend-point-details" aria-label="Selected opening rep">
     <h4 style={{ color: GRIP_COLORS[grip] || C.blue }}>{grip} · {handLabel(hand)} · {date}</h4>
     <strong>{percent} versus predicted force</strong>
     <dl>

@@ -16,7 +16,7 @@ test('brief maximal pulls update peaks and their reminder but never failure capa
   const r = measuredPeak();
   expect(isValidPeakMeasurement(r)).toBe(true);
   expect(r.failure_valid).toBe(false);
-  expect(evidenceLabel(r)).toBe('Peak measurement — not a failure hold');
+  expect(evidenceLabel(r)).toBe('Peak measurement — not a failure rep');
   expect(isCapacityEvidenceRep(r)).toBe(false);
   expect(freshFitReps([r])).toEqual([]);
   expect(recoveryEvidence([r]).eligible).toBe(false);

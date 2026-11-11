@@ -5,12 +5,12 @@ import { today } from '../../util.js';
 import { toDisp } from '../../ui/format.js';
 import { detectPlateaus, PLATEAU_REASON } from '../../model/plateau.js';
 const labels = { power: 'Power', power_strength: 'Power/Strength', strength: 'Strength', strength_endurance: 'Strength/Endurance', endurance: 'Endurance' };
-const statuses = { insufficient: 'More comparable holds needed', variable: 'Too variable to judge', improving: 'Improving', declining: 'Declining', stale: 'Recent evidence needed', watch: 'Recent slowing — keep observing', plateau: 'Possible persistent plateau' };
+const statuses = { insufficient: 'More comparable reps needed', variable: 'Too variable to judge', improving: 'Improving', declining: 'Declining', stale: 'Recent evidence needed', watch: 'Recent slowing — keep observing', plateau: 'Possible persistent plateau' };
 export function PlateauReview({ history = [], activities = [], experiments = {}, unit = 'lbs', date = today() }) {
   const report = useMemo(() => detectPlateaus({ history, activities, experiments, asOf: date }), [history, activities, experiments, date]);
   return <Card>
     <h2 style={{ marginTop: 0 }}>Plateau review · Research</h2>
-    <p style={{ color: C.muted }}>Fresh opening holds at nearly the same measured force, compared across two four-week periods. A possible plateau must also appear in a review ending two weeks earlier. These are experimental screening rules, not a diagnosis or proof that more training will help.</p>
+    <p style={{ color: C.muted }}>Fresh opening reps at nearly the same measured force, compared across two four-week periods. A possible plateau must also appear in a review ending two weeks earlier. These are experimental screening rules, not a diagnosis or proof that more training will help.</p>
     {report.byGrip.map(g => <section key={g.grip} aria-label={`${g.grip} plateau review`} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16, marginTop: 16 }}>
       <h3>{g.grip}</h3>
       <p>{g.recommendation === 'consider_volume_beta'
@@ -24,11 +24,11 @@ export function PlateauReview({ history = [], activities = [], experiments = {},
           <strong>{c.hand === 'L' ? 'Left' : 'Right'} · {labels[c.zone]}</strong> — {statuses[c.status]}
           {c.current && <p style={{ color: C.muted, margin: '6px 0' }}>
             Around {toDisp(c.forceKg, unit).toFixed(1)} {unit} · {c.current.earlyCount} earlier / {c.current.recentCount} recent dates.
-            {c.current.changePct != null && <> Median hold {c.current.earlyS.toFixed(1)}s → {c.current.recentS.toFixed(1)}s ({c.current.changePct >= 0 ? '+' : ''}{c.current.changePct.toFixed(1)}%).</>}
+            {c.current.changePct != null && <> Median hold time {c.current.earlyS.toFixed(1)}s → {c.current.recentS.toFixed(1)}s ({c.current.changePct >= 0 ? '+' : ''}{c.current.changePct.toFixed(1)}%).</>}
           </p>}
         </div>)}
       </details>
     </section>)}
-    <p style={{ color: C.muted, fontSize: 13 }}>Later sessions and sets, fatigued Chaos holds, interrupted capacity measurements, unknown session order, and mismatched timing or equipment are not used to establish a plateau. A plateau in one duration range does not establish a whole-curve plateau.</p>
+    <p style={{ color: C.muted, fontSize: 13 }}>Later sessions and sets, fatigued Chaos reps, interrupted capacity measurements, unknown session order, and mismatched timing or equipment are not used to establish a plateau. A plateau in one duration range does not establish a whole-curve plateau.</p>
   </Card>;
 }

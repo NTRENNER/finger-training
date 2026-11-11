@@ -28,8 +28,7 @@ import { SectionSelector } from "../ui/SectionSelector.jsx";
 import { C } from "../ui/theme.js";
 import { Card, Btn, Disclosure, PageFrame } from "../ui/components.jsx";
 import {
-  fmt1, fmtW, fmtTime, toDisp, fromDisp, fmtClock, bwOnDate,
-} from "../ui/format.js";
+  fmt1, fmtW, fmtTime, toDisp, fromDisp, fmtClock, bwOnDate, fmtDay } from "../ui/format.js";
 import { ymdLocal } from "../util.js";
 import { effectiveLoad, isShortfall, prescription, prescribedLoad } from "../model/prescription.js";
 import { TARGET_OPTIONS } from "../model/zones.js";
@@ -690,7 +689,7 @@ export function HistoryView({
                   }}>
                     <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: 10, minWidth: 0 }}>
                       <span style={{ fontSize: 13, color: C.muted, fontVariantNumeric: "tabular-nums" }}>
-                        {entry.date}
+                        {fmtDay(entry.date)}
                       </span>
                       <span style={{ fontSize: 15, fontWeight: 700, color: isAnomaly ? C.red : "inherit" }}>
                         {fmt1(lbs)} {unit}
@@ -819,7 +818,7 @@ export function HistoryView({
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12, color: C.muted }}>
-                  {sess.date}{sess.reps[0]?.session_started_at ? " · " + fmtClock(sess.reps[0].session_started_at) : ""}
+                  {fmtDay(sess.date)}{sess.reps[0]?.session_started_at ? " · " + fmtClock(sess.reps[0].session_started_at) : ""}
                   {(() => {
                     const e = bwOnDate(bwLog, sess.date);
                     if (!e) return null;

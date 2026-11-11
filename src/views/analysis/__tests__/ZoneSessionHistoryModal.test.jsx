@@ -55,6 +55,6 @@ test("reports when the opening hold landed in a different zone", () => {
     />
   );
 
-  expect(screen.getByText("Opened in Str-End")).toBeInTheDocument();
+  expect(screen.getByText("Opened in Str/End")).toBeInTheDocument();
   expect(screen.getByText(/75% target/)).toBeInTheDocument();
 });

@@ -295,7 +295,7 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
     targetSec: 45,
     restAfterSec: restForGrip(60, "Crusher", personalTaus),
     description:
-      "Sustained two-handed squeeze for tissue perfusion. Loaded enough to drive blood flow into both forearms, well below failure for the hold.",
+      "Sustained two-handed squeeze for tissue perfusion. Loaded enough to drive blood flow into both forearms, well below failure for the rep.",
   });
 
   // ── Perfusion 2: Crusher, moderate-margin ──
@@ -311,7 +311,7 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
     targetSec: isRoute ? 45 : 30,
     restAfterSec: restForGrip(90, "Crusher", personalTaus),
     description:
-      "Same gripper, a touch harder — working pump territory, still well below failure for the prescribed hold.",
+      "Same gripper, a touch harder — working pump territory, still well below failure for the prescribed rep.",
   });
 
   // ── Perfusion 3: Micro, climbing-specific small edge ──
@@ -354,7 +354,7 @@ export function generateWarmupProtocol({ history, bodyWeightKg, mode = "boulder"
         targetSec: rung.sec,
         restAfterSec: restForGrip(90, ladderGrip, personalTaus),
         description:
-          "Short, heavier hold. Progressive loading toward climbing intensity — pulleys and recruitment ramp up, but the hold is brief so fatigue stays low.",
+          "Short, heavier rep. Progressive loading toward climbing intensity — pulleys and recruitment ramp up, but the rep is brief so fatigue stays low.",
       });
     });
   }

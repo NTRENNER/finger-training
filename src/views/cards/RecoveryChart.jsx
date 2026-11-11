@@ -107,7 +107,7 @@ function RecoveryChart({
         </div>
       )}
       {predicted.length > 0 && <p style={{ fontSize: 12, color: C.muted, margin: '0 0 8px', lineHeight: 1.5 }}>
-        Dashed line: approximate time retained between holds. Shorter holds are expected within a set. This is not a readiness score.
+        Dashed line: approximate time retained between reps. Shorter reps are expected within a set. This is not a readiness score.
       </p>}
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={merged} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>

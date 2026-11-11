@@ -555,7 +555,7 @@ export function SessionPlanCard({
       <Card style={{ marginBottom: 16, padding: "20px 18px" }}>
         {plannerHeader || <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Session Plan</div>}
         <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-          Pick a grip above to see your continuous prescription.
+          Select a grip above to see your continuous prescription.
         </div>
         {plannerFooter}
       </Card>
@@ -973,7 +973,7 @@ export function SessionPlanCard({
         borderTop: `1px solid ${C.border}`, borderBottom: `1px solid ${C.border}`,
       }}>
         {[
-          { label: isPeakTest ? "Pulls" : "Hangs", value: reps },
+          { label: isPeakTest ? "Pulls" : "Reps", value: reps },
           { label: "Rest", value: `${rest}s` },
           { label: "Time", value: timeStr },
         ].map(({ label, value }, i, arr) => (
@@ -1182,7 +1182,7 @@ export function SessionPlanCard({
                   <span style={{ fontSize: "var(--session-choice-duration-size, 18px)", fontWeight: 700, color: C.text, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                     {r.T}s
                   </span>
-                  {r.reps && <span style={{ display: "block" }}>{r.reps} holds · {progressionLabel(r.ladder?.decision)}</span>}
+                  {r.reps && <span style={{ display: "block" }}>{r.reps} reps · {progressionLabel(r.ladder?.decision)}</span>}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
@@ -1217,7 +1217,7 @@ export function SessionPlanCard({
       </div>
       {isPeakTest && <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginTop: 12 }}>
         Build force smoothly. Pull as hard as you can for {MAX_TEST_TARGET_S}s, then release.
-        {" "}Alternate hands for three rounds. Records peak force; no target load or failure hold.
+        {" "}Alternate hands for three rounds. Records peak force; no target load or failure rep.
       </div>}
       </>
       {hand === 'Both' && <p style={{ fontSize: 12, color: C.muted, marginTop: 16 }}>

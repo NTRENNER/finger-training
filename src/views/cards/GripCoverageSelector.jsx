@@ -77,7 +77,7 @@ export function GripCoverageSelector({
   const selectedCoverage = coverageByGrip[value];
 
   return <section aria-label="Grip selection" style={{ marginBottom: 24 }}>
-    <h2 style={{ margin: "0 0 16px", fontSize: 24, fontWeight: 750 }}>Select a Device to Begin</h2>
+    <h2 style={{ margin: "0 0 16px", fontSize: 24, fontWeight: 750 }}>Select a Grip to Begin</h2>
     <div role="group" aria-label="Training device" style={{
       display: "grid",
       gridTemplateColumns: "repeat(3, minmax(0, 1fr))",

@@ -1,5 +1,6 @@
 // Retrospective day and session ratings. New sessions retain a separate
 // immutable adjustment snapshot; diary edits do not rewrite that snapshot.
+import { fmtDay } from "../../ui/format.js";
 import React, { useState, useEffect } from "react";
 import { C } from "../../ui/theme.js";
 
@@ -69,7 +70,7 @@ export function CookednessSlider({
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
         <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
-          Cookedness on {date}
+          Cookedness on {fmtDay(date)}
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <div style={{ fontSize: 16, fontWeight: 800, color: effective != null ? C.purple : C.muted }}>

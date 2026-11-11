@@ -75,7 +75,7 @@ test("hold-time evidence respects hand and selected date, excluding interruption
   ]} />);
   choose("Time");
   fireEvent.click(screen.getByText("Recorded pulls at this weight (1)"));
-  expect(screen.getByRole("list")).toHaveTextContent("2026-06-01 · L · 50.0s");
+  expect(screen.getByRole("list")).toHaveTextContent(/Jun 1(, 2026)? · L · 50\.0s/);
 });
 
 test("hold-time weights are independent for each domain", () => {
@@ -125,5 +125,5 @@ test("weight tiles select a dated weight chart without opening a modal", () => {
   expect(screen.getByLabelText("Weight progress comparison")).toHaveTextContent("at 115 seconds");
   fireEvent.change(screen.getByRole("slider"), { target: { value: "0" } });
   expect(screen.getByLabelText("Weight progress comparison")).toHaveTextContent("+0.0 kg");
-  expect(screen.getByLabelText("Weight progress comparison")).toHaveTextContent("2026-06-01 → 2026-06-01");
+  expect(screen.getByLabelText("Weight progress comparison")).toHaveTextContent(/Jun 1(, 2026)? → Jun 1/);
 });

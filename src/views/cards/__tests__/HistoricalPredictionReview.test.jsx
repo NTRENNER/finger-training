@@ -17,7 +17,7 @@ test('review runs on demand, shows original records separately, and discards sta
   expect(screen.getByRole('status')).toHaveTextContent('You can keep using the app');
   act(() => w.onmessage({ data: { report: evaluateHistorical(rows) } }));
   expect(screen.getByText('Recorded targets and results')).toBeInTheDocument();
-  expect(screen.getByText(/1 opening holds on 1 days/)).toBeInTheDocument();
+  expect(screen.getByText(/1 opening reps on 1 days/)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Download historical review' })).toBeInTheDocument();
   const changed = [...rows, { ...rows[0], id: 'next', date: '2026-09-21' }];
   rerender(<HistoricalPredictionReview history={changed} unit="lbs" />);

@@ -13,13 +13,13 @@ const renderPlan=history=>render(<MixedDomainPlan plan={plan} hands={['L','R']} 
 test('ready preview describes a conditional total rather than an assured session length',()=>{
  renderPlan([...h,...h.map(r=>({...r,id:r.id+'R',hand:'R'}))]);
  expect(screen.getByText(/Time per set if all targets are reached: 23:50 for both hands/)).toBeInTheDocument();
- expect(screen.getAllByText('Reference · adjustment estimated before this hold')).toHaveLength(8);
+ expect(screen.getAllByText('Reference · adjustment estimated before this rep')).toHaveLength(8);
 });
 test('partial readiness identifies each affected hand and duration without promising a budget',()=>{
  renderPlan(h.filter(r=>r.actual_time_s<=160));
  expect(screen.queryByText(/23:50/)).not.toBeInTheDocument();
- const left=within(screen.getByRole('list',{name:'Left hand holds'})),right=within(screen.getByRole('list',{name:'Right hand holds'}));
- expect(left.getAllByText('Reference · adjustment estimated before this hold')).toHaveLength(3);
+ const left=within(screen.getByRole('list',{name:'Left hand reps'})),right=within(screen.getByRole('list',{name:'Right hand reps'}));
+ expect(left.getAllByText('Reference · adjustment estimated before this rep')).toHaveLength(3);
  expect(left.getByText(/outside the measured range/)).toBeInTheDocument();
  expect(right.getAllByText(/More measured history is needed for this hand/)).toHaveLength(4);
 });

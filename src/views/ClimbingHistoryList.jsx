@@ -34,6 +34,7 @@
 // onUpdateActivity / onDeleteActivity are optional — omit either to
 // render the corresponding control as read-only.
 
+import { fmtDay } from "../ui/format.js";
 import React, { useEffect, useMemo, useState } from "react";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.jsx";
@@ -466,7 +467,7 @@ function ClimbRow({ climb: c, onEdit, onDelete, showDate = false, hideRouteName 
           )}
         </div>
         <div style={{ fontSize: 11, color: isSend ? C.green : C.muted }}>
-          {showDate && c.date ? `${c.date} · ` : ""}
+          {showDate && c.date ? `${fmtDay(c.date)} · ` : ""}
           {c.ascent ? ascentMeta(c.ascent).label : describeClimb(c)}
           {Number.isFinite(c.attempts) && c.attempts > 1
             ? ` · ${c.attempts} tries`

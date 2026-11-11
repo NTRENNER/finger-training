@@ -191,7 +191,7 @@ export function decisiveWhy(rec, { ladderText = null } = {}) {
     return "new grip — three brief Peak Test pulls measure your maximum force";
   }
   if (rec.coldStartStage === "lower") {
-    return "upper anchor set — the first long hold establishes the lower bound; the next three measure short-rest recovery";
+    return "upper anchor set — the first long rep establishes the lower bound; the next three measure short-rest recovery";
   }
   if (rec.coldStartStage === "middle") {
     return "upper and lower bounds set — now fill the middle of the curve";

@@ -156,7 +156,7 @@ const AWARD_COPY = [
   { type: "recommendation", emoji: "🎯", title: "Beat the recommendation",
     line: a => `held ${pctOver(a.timeRatio)} longer at the recommended weight` },
   { type: "recovery", emoji: "🔋", title: "Strong recovery",
-    line: () => "second hold lasted longer than expected" },
+    line: () => "second rep lasted longer than expected" },
 ];
 
 // Level display — numeric only, no old badge names. Used by
@@ -804,7 +804,7 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
         </div>
       </Card>
 
-      {releaseBlocked && <Card><p>Your hold is saved. Rest starts after this check.</p><UnloadedZeroCheck tindeq={tindeq} /></Card>}
+      {releaseBlocked && <Card><p>Your rep is saved. Rest starts after this check.</p><UnloadedZeroCheck tindeq={tindeq} /></Card>}
 
       <RestHoldTimeChart context={curveContext} unit={unit} />
 
@@ -859,7 +859,7 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
       {nextWeight != null && !isLastRepInSet && (
         <Card style={{ borderColor: C.blue }}>
           <Label>{nextAdjustment?.status === 'adjusted' ? 'New target weight' : 'Next target weight'}</Label>
-          {nextDomain && <p><strong>{MIXED_DOMAIN_LABELS[nextDomain]}</strong> · Pull to this target on your next hold.</p>}
+          {nextDomain && <p><strong>{MIXED_DOMAIN_LABELS[nextDomain]}</strong> · Pull to this target on your next rep.</p>}
           {mixedAdjustmentText(nextAdjustment) && <p>{mixedAdjustmentText(nextAdjustment)}</p>}
           <div style={{ fontSize: 36, fontWeight: 800, color: C.blue }}>
             {fmtW(nextWeight, unit)} {unit}
@@ -963,7 +963,7 @@ export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
       <p style={{ color: C.muted }}>{fullSetBreak ? 'Five-minute break between sets. Start when you are ready.'
         : 'Five minutes for this hand. Time spent training your other hand counts.'}</p>
       {source === 'estimated_transition' && <p style={{ color: C.muted }}>
-        Rest is estimated from when the last hold was recorded because its release time was not captured.
+        Rest is estimated from when the last rep was recorded because its release time was not captured.
       </p>}
       {remaining === 0 && <p>Ready for set {setNumber} when you are.</p>}
       {releaseBlocked && <UnloadedZeroCheck tindeq={tindeq} />}
@@ -1065,7 +1065,7 @@ export function SessionSummaryView({
         {setComplete ? (volume && currentSet === 2 ? 'Volume Beta Complete' : config.mixedDomainPlan ? `Chaos Machine · Set ${currentSet} Complete` : currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
       </h2>
       {!volume && config.plannedSets > 1 && <p style={{ color: C.muted }}>{config.plannedSets} sets per hand selected. Continue when ready, or finish today.</p>}
-      {config.mixedDomainPlan && <p>Chaos Machine (Beta). Only eligible opening holds from set one can update the curve; later holds and sets are recorded as fatigued work. Your regular rep progression is unchanged.</p>}
+      {config.mixedDomainPlan && <p>Chaos Machine (Beta). Only eligible opening reps from set one can update the curve; later reps and sets are recorded as fatigued work. Your regular rep progression is unchanged.</p>}
 
       {/* The same hold-time chart the rest screens show, one per hand
           trained in the set just finished. */}
@@ -1151,7 +1151,7 @@ export function SessionSummaryView({
 
       {volume && currentSet === 1 && setComplete && onAddSet && <Card>
         <strong>Volume Beta: second set planned</strong>
-        <p style={{ color: C.muted }}>Same target weights and holds. Each hand gets five minutes of rest, including time spent training the other hand.</p>
+        <p style={{ color: C.muted }}>Same target weights and reps. Each hand gets five minutes of rest, including time spent training the other hand.</p>
         <Btn onClick={onAddSet} style={{ width: '100%', padding: '14px 0' }}>Continue to set 2</Btn>
       </Card>}
 
@@ -1178,7 +1178,7 @@ export function SessionSummaryView({
           ↓ Export CSV
         </Btn>
         <Btn onClick={onDone} style={{ flex: 2 }}>
-          {volume || config.plannedSets > 1 ? 'Finish today' : 'Back to Setup'}
+          {volume || config.plannedSets > 1 ? 'Finish today' : 'Done'}
         </Btn>
       </div>
     </PageFrame>
@@ -1399,7 +1399,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
             style={{ display: 'block', width: '100%', boxSizing: 'border-box', marginTop: 6,
               padding: 12, borderRadius: 8, background: C.bg, color: C.text, border: `1px solid ${C.border}`, fontSize: 18 }} />
         </label>
-        <p style={{ color: C.muted }}>Choose before pulling. This target applies to this hold; the original recommendation is kept in your history.</p>
+        <p style={{ color: C.muted }}>Choose before pulling. This target applies to this rep; the original recommendation is kept in your history.</p>
         {manualKg != null && <Btn small onClick={() => setTargetInput('')}>Use program target</Btn>}
       </details>}
       {!repActive && <UnloadedZeroCheck tindeq={tindeq} />}

@@ -241,7 +241,7 @@ function RepCurveChart({
             domain={[0, yMax]}
             tickFormatter={v => Math.round(v)}
             tick={{ fontSize: 10, fill: C.muted }}
-            label={{ value: "Hold (s)", angle: -90, position: "insideLeft", offset: 12, fontSize: 10, fill: C.muted }}
+            label={{ value: "Hold time (s)", angle: -90, position: "insideLeft", offset: 12, fontSize: 10, fill: C.muted }}
           />
           <Tooltip content={<CustomTooltip unit={unit} />} />
           {showLegend && (

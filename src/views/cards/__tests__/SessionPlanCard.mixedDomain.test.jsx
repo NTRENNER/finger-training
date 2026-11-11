@@ -96,9 +96,9 @@ test('Chaos starts at the recommended domain and both hands share the same seque
   expect(apply.mock.calls.at(-1)[0].mixedDomainPlan.steps.map(step => step.zone)).toEqual([
     'strength_endurance', 'endurance', 'power', 'power_strength', 'strength',
   ]);
-  const left = within(screen.getByRole('list', { name: 'Left hand holds' }))
+  const left = within(screen.getByRole('list', { name: 'Left hand reps' }))
     .getAllByRole('listitem').map(element => element.textContent);
-  const right = within(screen.getByRole('list', { name: 'Right hand holds' }))
+  const right = within(screen.getByRole('list', { name: 'Right hand reps' }))
     .getAllByRole('listitem').map(element => element.textContent);
   expect(left).toEqual(right);
 });

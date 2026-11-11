@@ -99,9 +99,9 @@ export const zoneOf = (td) =>
 export const ZONE6 = [
   { key: "max_strength",       label: "Max Strength",       short: "Max",     color: "#c83838", min:   0, max: MAX_STRENGTH_MAX },
   { key: "power",              label: "Power",              short: "Pwr",     color: "#e05560", min: MAX_STRENGTH_MAX,       max: POWER_MAX },
-  { key: "power_strength",     label: "Power-Strength",     short: "Pwr-Str", color: "#e68a48", min: POWER_MAX,              max: POWER_STRENGTH_MAX },
+  { key: "power_strength",     label: "Power/Strength",     short: "Pwr/Str", color: "#e68a48", min: POWER_MAX,              max: POWER_STRENGTH_MAX },
   { key: "strength",           label: "Strength",           short: "Str",     color: "#e07a30", min: POWER_STRENGTH_MAX,     max: STRENGTH_MAX },
-  { key: "strength_endurance", label: "Strength-Endurance", short: "Str-End", color: "#7aa0d8", min: STRENGTH_MAX,           max: STRENGTH_ENDURANCE_MAX },
+  { key: "strength_endurance", label: "Strength/Endurance", short: "Str/End", color: "#7aa0d8", min: STRENGTH_MAX,           max: STRENGTH_ENDURANCE_MAX },
   { key: "endurance",          label: "Endurance",          short: "End",     color: "#3b82f6", min: STRENGTH_ENDURANCE_MAX, max: Infinity },
 ];
 

@@ -104,7 +104,7 @@ export function detectPlateaus({ history = [], activities = [], asOf, experiment
     const cells = HANDS.flatMap(hand => TRAINING_ZONE_KEYS.map(zone => {
       const own = points.filter(p => scope(p) === `${grip}|${hand}|${zone}`);
       const anchor = own.at(-1);
-      if (!anchor) return { hand, zone, status: 'insufficient', reason: 'No comparable fresh opening holds.' };
+      if (!anchor) return { hand, zone, status: 'insufficient', reason: 'No comparable fresh opening reps.' };
       const current = compare(own, anchor, asOf), prior = compare(own, anchor, shift(asOf, -14));
       const stale = anchor.date < shift(asOf, -14);
       const status = stale ? 'stale' : current.state !== 'flat' ? current.state

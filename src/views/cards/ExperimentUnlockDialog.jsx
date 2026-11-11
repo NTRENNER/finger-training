@@ -33,12 +33,12 @@ export function ExperimentUnlockDialog({ features = [], grip, onChaos, onVolume,
     </p>
     {hasChaos && <div className="experiment-dialog-option">
       <strong>Chaos Machine</strong>
-      <p>Train five force-duration domains in one sequence. Only the fresh opening hold updates the curve; later holds measure how performance changes under fatigue.</p>
+      <p>Train five force-duration domains in one sequence. Only the fresh opening rep updates the curve; later reps measure how performance changes under fatigue.</p>
       <button type="button" className="experiment-dialog-primary" onClick={onChaos}>Preview Chaos session</button>
     </div>}
     {hasVolume && <div className="experiment-dialog-option">
       <strong>Volume Beta</strong>
-      <p>Your comparable opening holds show a persistent plateau. This optional six-week trial tests whether a second work set improves progress without changing the prescribed domain.</p>
+      <p>Your comparable opening reps show a persistent plateau. This optional six-week trial tests whether a second work set improves progress without changing the prescribed domain.</p>
       <button type="button" className="experiment-dialog-primary" onClick={onVolume}>Review Volume Beta</button>
     </div>}
     <button type="button" className="experiment-dialog-secondary" onClick={onClose}>Keep recommendation</button>

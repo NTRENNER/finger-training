@@ -14,7 +14,7 @@ function ReplayScores({ name, scores, unit }) {
   const fmt = n => n == null ? '—' : `${(n * factor).toFixed(1)} ${unit}`;
   return <div style={{ marginTop: 16 }}>
     <strong>{name}</strong>
-    <div style={{ color: C.muted, fontSize: 13, margin: '6px 0' }}>{a.trainingDays} days · {a.observations} opening holds</div>
+    <div style={{ color: C.muted, fontSize: 13, margin: '6px 0' }}>{a.trainingDays} days · {a.observations} opening reps</div>
     <table style={{ width: '100%', textAlign: 'left', fontSize: 14 }}>
       <thead><tr><th>Error</th><th>Current</th></tr></thead>
       <tbody>{[['Typical', 'mae'], ['Larger misses', 'rmse'], ['Bias', 'bias']].map(([label, k]) =>
@@ -65,7 +65,7 @@ export function HistoricalPredictionReview({ history, unit }) {
   const matched = report?.recorded.all.matched;
   return <section style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 18, marginBottom: 18 }}>
     <strong>Your earlier workouts</strong>
-    <p style={{ color: C.muted, lineHeight: 1.5 }}>Your saved targets and measured holds can already tell us how the recommendations performed.
+    <p style={{ color: C.muted, lineHeight: 1.5 }}>Your saved targets and measured reps can already tell us how the recommendations performed.
       We can also replay competing models using only workouts before each training day.</p>
     {!report && <Btn onClick={run} disabled={busy || !history.length}>{busy ? 'Reviewing history…' : 'Review earlier workouts'}</Btn>}
     {busy && <p role="status" style={{ color: C.muted }}>Running the comparison. You can keep using the app.</p>}
@@ -73,7 +73,7 @@ export function HistoricalPredictionReview({ history, unit }) {
     {report && <>
       <p>{report.replay.inventory.trainingDays} recorded training days · through {report.replay.inventory.lastDate || '—'}</p>
       <details open><summary style={{ cursor: 'pointer', fontWeight: 700 }}>Recorded targets and results</summary>
-        <p>{matched.holds} opening holds on {matched.days} days were within 10% of the prescribed force.</p>
+        <p>{matched.holds} opening reps on {matched.days} days were within 10% of the prescribed force.</p>
         <p style={{ color: C.muted, fontSize: 13 }}>{report.recorded.byEvidence.legacy_or_uncertain?.matched.holds || 0} of these comparisons use older records with uncertain measurement or ending details.</p>
         {matched.holds ? <>
           <p style={{ fontSize: 20, fontWeight: 700 }}>{pretty(matched.meanPercentBeyondTarget)} average time versus target</p>
@@ -81,15 +81,15 @@ export function HistoricalPredictionReview({ history, unit }) {
           <ul><li>{matched.below80Percent} ended below 80% of target time</li>
             <li>{matched.within20Percent} were within 20% of target time</li>
             <li>{matched.above120Percent} exceeded 120% of target time</li></ul>
-        </> : <p style={{ color: C.muted }}>No comparable measured opening holds for this check yet.</p>}
-        <p style={{ color: C.muted }}>Higher-force holds stay useful: {report.recorded.all.higherForceAndAtLeastTargetTime} exceeded force by more than 10% and reached the target time.
-          Other different-load holds are kept separate from time-at-target comparisons.</p>
+        </> : <p style={{ color: C.muted }}>No comparable measured opening reps for this check yet.</p>}
+        <p style={{ color: C.muted }}>Higher-force reps stay useful: {report.recorded.all.higherForceAndAtLeastTargetTime} exceeded force by more than 10% and reached the target time.
+          Other different-load reps are kept separate from time-at-target comparisons.</p>
         <details><summary style={{ cursor: 'pointer' }}>By grip and planned domain</summary>
           {[...Object.entries(report.recorded.byGrip), ...Object.entries(report.recorded.byDomain)].map(([key, value]) =>
-            <p key={key}><strong>{domainNames[key] || key}</strong> · {value.matched.holds} holds / {value.matched.days} days · {pretty(value.matched.meanPercentBeyondTarget)} time</p>)}
+            <p key={key}><strong>{domainNames[key] || key}</strong> · {value.matched.holds} reps / {value.matched.days} days · {pretty(value.matched.meanPercentBeyondTarget)} time</p>)}
         </details>
-        <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>Only first-set opening holds enter this check. Later reps, interruptions and special protocols are excluded.
-          {` ${report.recorded.shortTargets.count} short-target holds are listed separately in the download.`}
+        <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.5 }}>Only first-set opening reps enter this check. Later reps, interruptions and special protocols are excluded.
+          {` ${report.recorded.shortTargets.count} short-target reps are listed separately in the download.`}
           {' '}Older records may have estimated loads or uncertain endings; the download separates them from explicit measured failures.</p>
       </details>
       <details style={{ marginTop: 18 }}><summary style={{ cursor: 'pointer', fontWeight: 700 }}>Models replayed on earlier workouts</summary>

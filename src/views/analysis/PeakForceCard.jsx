@@ -23,7 +23,7 @@ import {
 import { C } from "../../ui/theme.js";
 import { Card } from "../../ui/components.jsx";
 import { GRIP_COLORS } from "../../ui/grip-colors.js";
-import { bwOnDate, fmt1, toDisp } from "../../ui/format.js";
+import { bwOnDate, fmt1, toDisp, fmtMonthDay } from "../../ui/format.js";
 import { buildPeakForceTrend } from "../../model/peakForce.js";
 
 export function formatPeakForceTooltip(value, name, item, unit) {
@@ -184,7 +184,7 @@ export function PeakForceCard({
       for (const h of hands) for (const r of byHand[h].rows) dateSet.add(r.date);
       const dates = [...dateSet].sort();
       const rows = dates.map(date => {
-        const o = { date: date.slice(5) };
+        const o = { date: fmtMonthDay(date) };
         for (const h of hands) {
           const src = byHand[h].rows.find(x => x.date === date);
           for (const g of byHand[h].grips) {
@@ -216,7 +216,7 @@ export function PeakForceCard({
       };
     }
     const rows = trend.rows.map(r => {
-      const o = { date: r.date.slice(5) };
+      const o = { date: fmtMonthDay(r.date) };
       for (const g of trend.grips) {
         o[`${g}_pr`] = r[`${g}_pr`] != null ? displayValue(r[`${g}_pr`]) : null;
         const newPr = r[`${g}_newPr`];

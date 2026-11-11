@@ -9,7 +9,7 @@ export function VolumeBetaEnrollment({ grips, selectedGrips, onGripsChange, onSt
       {grips.map(grip => <Toggle key={grip} label={grip} checked={selectedGrips.includes(grip)} disabled={busy}
         onChange={checked => onGripsChange(checked ? [...selectedGrips, grip] : selectedGrips.filter(g => g !== grip))} />)}
     </div>
-    <p>Each session has two sets per hand, using your normal domain and 4–5–6 hold progression. Each hand has a five-minute rest target between sets, including time spent training the other hand.</p>
+    <p>Each session has two sets per hand, using your normal domain and 4–5–6 rep progression. Each hand has a five-minute rest target between sets, including time spent training the other hand.</p>
     <p>Your earlier training supplies the starting comparison automatically. Limited or inconsistent history will be marked provisional. The experiment compares measured progress and training cost; it does not promise that more sets work better.</p>
     <div className="volume-beta-actions">
       <button type="button" className="volume-beta-primary" disabled={!selectedGrips.length || busy} onClick={onStart}>
@@ -35,7 +35,7 @@ export function VolumeBetaSummary({ experiment, progress, status, grip, enabled,
     {progress?.byGrip?.length > 0 && <ul>
       {progress.byGrip.map(row => <li key={row.grip}>{row.grip}: {row.completed || 0} of {row.goal || 18} complete sessions</li>)}
     </ul>}
-    {enabled && <p>Two sets per hand · five minutes between sets for each hand. Your usual domain choices and hold progression stay available.</p>}
+    {enabled && <p>Two sets per hand · five minutes between sets for each hand. Your usual domain choices and rep progression stay available.</p>}
     {!finished && status === 'active' && chaosEnabled && <p>Your Volume plan continues. This workout uses Chaos Machine and will not count as a two-set Volume session.</p>}
     {!finished && status === 'active' && selected && !enabled && !chaosEnabled && <p>Volume is not selected for this workout. Your six-week plan continues; turn on Volume for an eligible ordinary session.</p>}
     {!finished && !selected && <p>This plan includes {experiment.grips?.join(' and ')}. {grip} uses its usual session.</p>}

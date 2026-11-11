@@ -33,7 +33,7 @@ test("reminds at seven calendar days, including across DST, using the latest val
 test("Not now suppresses the reminder after remount that day but not the next day", () => {
   saveLS(LS_BW_LOG_KEY, [{ date: "2026-09-09", kg: 70 }]);
   const view = render(<BwPrompt onSave={jest.fn()} />);
-  expect(screen.getByRole("dialog")).toHaveTextContent("2026-09-09");
+  expect(screen.getByRole("dialog")).toHaveTextContent("Sep 9");
   fireEvent.click(screen.getByRole("button", { name: "Not now" }));
   expect(loadLS(LS_BW_REMINDER_DISMISSED_KEY)).toBe("2026-09-16");
   view.unmount();

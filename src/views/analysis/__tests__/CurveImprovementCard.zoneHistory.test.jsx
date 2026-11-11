@@ -248,7 +248,7 @@ test("uses the active hand when opening a per-hand tile", () => {
     />
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "Strength-Endurance session history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Strength/Endurance session history" }));
 
   expect(screen.getByText("Crusher · Left hand")).toBeInTheDocument();
   expect(screen.getByText("10.0 kg")).toBeInTheDocument();
@@ -290,12 +290,12 @@ test("hand view renders the curve + Now slider when the hand has overlay data", 
   // Interactive block: slider present, defaulting to the latest date.
   const slider = screen.getByRole("slider");
   expect(screen.getByText(/2 of 2 sessions since baseline/)).toBeInTheDocument();
-  expect(screen.getByText("2026-07-01")).toBeInTheDocument();
+  expect(screen.getByText(/^Jul 1(, 2026)?$/)).toBeInTheDocument();
 
   // Scrub back to the first post-baseline session.
   fireEvent.change(slider, { target: { value: "0" } });
   expect(screen.getByText(/1 of 2 sessions since baseline/)).toBeInTheDocument();
-  expect(screen.getByText("2026-06-08")).toBeInTheDocument();
+  expect(screen.getByText(/^Jun 8(, 2026)?$/)).toBeInTheDocument();
 });
 
 test("hand view falls back to static tiles when the hand has no overlay", () => {

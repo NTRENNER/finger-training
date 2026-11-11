@@ -143,7 +143,7 @@ describe("decisiveWhy", () => {
   });
   test("cold-start boundary stages explain the measurement sequence", () => {
     expect(decisiveWhy({ coldStartStage: "upper" })).toMatch(/three brief Peak Test pulls/);
-    expect(decisiveWhy({ coldStartStage: "lower" })).toMatch(/first long hold/);
+    expect(decisiveWhy({ coldStartStage: "lower" })).toMatch(/first long rep/);
     expect(decisiveWhy({ coldStartStage: "lower" })).toMatch(/next three/);
     expect(decisiveWhy({ coldStartStage: "middle" })).toMatch(/fill the middle/);
   });

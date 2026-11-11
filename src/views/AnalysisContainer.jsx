@@ -78,7 +78,7 @@ export function AnalysisContainer(props) {
       <Card style={{ margin: "20px 16px 16px", padding: "20px 18px" }}>
         <h2 style={{ margin: "0 0 20px", fontSize: 26 }}>Analysis</h2>
         <SectionSelector label="Analysis category" value={sub} onChange={pickSub}
-          options={[["fingers", "Fingers"], ["lifts", "Lifts"], ["climbing", "Climbs"], ["weight", "Weight"]]} />
+          options={[["fingers", "Fingers"], ["lifts", "Workout"], ["climbing", "Climb"], ["weight", "Weight"]]} />
       </Card>
       {/* Interpretation is intentionally centralized in Analysis. This live
           summary refreshes after completed work; training surfaces stay

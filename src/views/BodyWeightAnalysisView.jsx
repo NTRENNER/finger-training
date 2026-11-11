@@ -21,7 +21,7 @@ import {
 } from "recharts";
 import { C } from "../ui/theme.js";
 import { Card, Sect } from "../ui/components.jsx";
-import { fmt1, toDisp } from "../ui/format.js";
+import { fmt1, toDisp, fmtMonthDay, fmtDay } from "../ui/format.js";
 import { LS_BW_LOG_KEY } from "../lib/storage.js";
 import { useLSValue } from "../hooks/useLSValue.js";
 import { ymdLocal } from "../util.js";
@@ -97,7 +97,7 @@ export function BodyWeightAnalysisView({ unit = "lbs" }) {
     if (filtered.length === 0) return [];
     const avgKg = rollingAvg(filtered, 7);
     return filtered.map((e, i) => ({
-      date: e.date.slice(5),  // MM-DD for axis density
+      date: fmtMonthDay(e.date),  // MM-DD for axis density
       raw: Math.round(toDisp(e.kg, unit) * 10) / 10,
       avg: Math.round(toDisp(avgKg[i], unit) * 10) / 10,
       isoDate: e.date,
@@ -160,7 +160,7 @@ export function BodyWeightAnalysisView({ unit = "lbs" }) {
             heavier, blue for lighter), not a value judgment. */}
         <Card>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <Stat label="Current" value={`${fmt1(toDisp(headline.latestKg, unit))} ${unit}`} sub={headline.latestDate} />
+            <Stat label="Current" value={`${fmt1(toDisp(headline.latestKg, unit))} ${unit}`} sub={fmtDay(headline.latestDate)} />
             <Stat label="Days tracked" value={headline.daysTracked} sub={`${headline.entryCount} entr${headline.entryCount === 1 ? "y" : "ies"}`} />
             <Stat
               label="Δ vs 30 days ago"

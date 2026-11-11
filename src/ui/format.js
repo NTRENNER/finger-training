@@ -66,3 +66,18 @@ export const bwOnDate = (bwLog, date) => {
   const candidates = (bwLog || []).filter(e => e.date <= date);
   return candidates.length ? candidates[candidates.length - 1] : null;
 };
+
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// "Nov 10" for a YYYY-MM-DD (or MM-DD) date. The one date format shown in
+// the app; fmtDay adds the year only when it is not the current year.
+export const fmtMonthDay = (value) => {
+  const m = /(?:^|\d{4}-)(\d{2})-(\d{2})/.exec(String(value ?? ""));
+  const month = m && MONTHS_SHORT[Number(m[1]) - 1];
+  return month ? `${month} ${Number(m[2])}` : String(value ?? "");
+};
+export const fmtDay = (ymd) => {
+  const year = /^(\d{4})-\d{2}-\d{2}/.exec(String(ymd ?? ""))?.[1];
+  const label = fmtMonthDay(ymd);
+  return year && Number(year) !== new Date().getFullYear() ? `${label}, ${year}` : label;
+};

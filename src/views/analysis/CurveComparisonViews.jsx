@@ -2,7 +2,7 @@ import { CHART } from '../../ui/chartStyles.js';
 import React from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from "recharts";
 import { C } from "../../ui/theme.js";
-import { toDisp, fmt1 } from "../../ui/format.js";
+import { toDisp, fmt1, fmtDay } from "../../ui/format.js";
 import { ZONE6, ZONE_REF_T } from "../../model/zones.js";
 import { zoneReference, progressHoldTime, defaultComparisonLoad, holdTimeAtForce, holdTimeSeries, forceComparison, forceHistorySeries } from "../../model/curveComparison.js";
 
@@ -23,7 +23,7 @@ export function WeightTile({ comparison, unit, baselineDate, color = C.text }) {
     <div style={{ fontSize: 20, fontWeight: 800, color: comparison.delta < 0 ? C.red : color }}>{signed(toDisp(comparison.delta, unit))} {unit}</div>
     <div style={{ fontSize: 12, color: C.text, marginTop: 4 }}>{fmt1(toDisp(comparison.before, unit))} → {fmt1(toDisp(comparison.now, unit))} {unit}</div>
     <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>at {comparison.duration}s</div>
-    {comparison.baselineDate !== baselineDate && <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>since {comparison.baselineDate}</div>}
+    {comparison.baselineDate !== baselineDate && <div style={{ fontSize: 11, color: C.muted, marginTop: 3 }}>since {fmtDay(comparison.baselineDate)}</div>}
   </>;
 }
 
@@ -84,7 +84,7 @@ export function HoldTimeView({ overlay, date, unit, reps, zone, onZoneChange }) 
       <div style={{ fontSize: 18, color: C.text, lineHeight: 1.5 }}>
         At <strong>{fmt1(toDisp(load, unit))} {unit}</strong>, your estimated hold time went from <strong>{fmt1(before)} seconds</strong> to <strong>{fmt1(now)} seconds</strong>.
       </div>
-      <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Estimated · {reference.date} → {date}</div>
+      <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Estimated · {fmtDay(reference.date)} → {fmtDay(date)}</div>
       {overlay.continuityByDate?.get(date)?.evidenceDates?.[selected.key] && <div style={{fontSize:12,color:C.muted}}>Evidence through {overlay.continuityByDate.get(date).evidenceDates[selected.key]}</div>}
     </div> : <p role="status" style={{ fontSize: 14, color: C.muted, lineHeight: 1.5 }}>
       {!reference ? "No baseline yet for this domain." : "Not enough supported hold-time data at this weight to compare both dates. The baseline weight stays fixed as more training data becomes available."}
@@ -98,14 +98,14 @@ export function HoldTimeView({ overlay, date, unit, reps, zone, onZoneChange }) 
         <Tooltip contentStyle={CHART.tooltip} formatter={(value, name) => [`${fmt1(Number(value))}s`, name]} />
         {before != null && <ReferenceLine y={before} stroke={C.muted} strokeDasharray="4 4" />}
         <Line dataKey="seconds" name="Estimated hold time" stroke={C.purple} strokeWidth={3} strokeDasharray="5 3" dot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />
-        <Line dataKey="measured" name="Longest recorded hold" stroke="none" dot={{ r: 4, fill: C.green, stroke: C.green }} activeDot={{ r: 6 }} connectNulls={false} isAnimationActive={false} />
+        <Line dataKey="measured" name="Longest recorded rep" stroke="none" dot={{ r: 4, fill: C.green, stroke: C.green }} activeDot={{ r: 6 }} connectNulls={false} isAnimationActive={false} />
       </LineChart>
     </ResponsiveContainer>}
-    {rows.some(row => row.seconds != null || row.measured != null) && <div style={{ fontSize: 12, color: C.muted }}>Dashed line: estimated · Green dots: longest recorded holds</div>}
+    {rows.some(row => row.seconds != null || row.measured != null) && <div style={{ fontSize: 12, color: C.muted }}>Dashed line: estimated · Green dots: longest recorded reps</div>}
     {matches.length > 0 && <details style={{ marginTop: 10, fontSize: 13 }}>
       <summary style={{ cursor: "pointer", color: C.text }}>Recorded pulls at this weight ({matches.length})</summary>
       <ul style={{ paddingLeft: 20, lineHeight: 1.7 }}>{matches.map((rep, i) => <li key={`${rep.id || rep.session_id}-${i}`}>
-        {rep.date} · {rep.hand || "Hand unrecorded"} · {fmt1(Number(rep.actual_time_s))}s
+        {fmtDay(rep.date)} · {rep.hand || "Hand unrecorded"} · {fmt1(Number(rep.actual_time_s))}s
       </li>)}</ul>
       <div style={{ color: C.muted }}>Recorded averages; compare the same hand and setup when judging a change.</div>
     </details>}
@@ -128,12 +128,12 @@ export function WeightHistoryView({ overlay, date, unit, reps, zone, onShowSessi
   }
   const rows = [...rowsByDate.values()].sort((a, b) => a.date.localeCompare(b.date));
   return <div aria-label={`${domain.label} weight over time`}>
-    <div style={{ fontSize: 16, color: domain.color, fontWeight: 700, marginBottom: 8 }}>{domain.label} · {duration}s holds</div>
+    <div style={{ fontSize: 16, color: domain.color, fontWeight: 700, marginBottom: 8 }}>{domain.label} · {duration}s reps</div>
     {comparison ? <>
       <div aria-label="Weight progress comparison" style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 30, fontWeight: 800, color: comparison.delta < 0 ? C.red : domain.color }}>{signed(toDisp(comparison.delta, unit))} {unit}</div>
         <div style={{ fontSize: 16, color: C.text }}>{fmt1(toDisp(comparison.before, unit))} → {fmt1(toDisp(comparison.now, unit))} {unit} at {duration} seconds</div>
-        <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Estimated · {comparison.baselineDate} → {date}</div>
+        <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>Estimated · {fmtDay(comparison.baselineDate)} → {fmtDay(date)}</div>
       </div>
       <ResponsiveContainer width="100%" height={210}>
         <LineChart data={rows} margin={{ top: 10, right: 12, bottom: 10, left: 0 }}>
@@ -148,7 +148,7 @@ export function WeightHistoryView({ overlay, date, unit, reps, zone, onShowSessi
           <Line dataKey="measured" name={`Highest recorded weight at ${duration}s`} stroke="none" dot={{ r: 4, fill: C.green, stroke: C.green }} connectNulls={false} isAnimationActive={false} />
         </LineChart>
       </ResponsiveContainer>
-      <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>Dashed line: estimated · Green dots: recorded holds at {duration}s</div>
+      <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>Dashed line: estimated · Green dots: recorded reps at {duration}s</div>
     </> : <p role="status" style={{ color: C.muted, fontSize: 14 }}>No supported baseline comparison for this domain yet.</p>}
     {onShowSessions && <button type="button" onClick={onShowSessions} style={controlStyle}>View {domain.label} sessions</button>}
   </div>;

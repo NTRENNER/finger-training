@@ -1,3 +1,4 @@
+import { fmtMonthDay } from "../ui/format.js";
 import { CHART } from '../ui/chartStyles.js';
 // ──────────────────────────────────────────────────────────────
 // CLIMBING ANALYSIS VIEW
@@ -220,7 +221,7 @@ export function ClimbingAnalysisView({
     const sortedDates = Object.keys(byDate).sort();
     const recent = sortedDates.slice(-60);
     const rows = recent.map(date => ({
-      date: date.slice(5),  // MM-DD for axis density
+      date: fmtMonthDay(date),  // MM-DD for axis density
       boulder: byDate[date] || 0,
       __total: byDate[date] || 0,
     }));
@@ -252,7 +253,7 @@ export function ClimbingAnalysisView({
     const sortedDates = Object.keys(byDate).sort();
     const recent = sortedDates.slice(-60);
     const rows = recent.map(date => ({
-      date: date.slice(5),
+      date: fmtMonthDay(date),
       route: Math.round((byDate[date] || 0) * 10) / 10,  // afa values are fractional
     }));
     const trend = rows.length >= 4 ? linearTrendline(rows.map(r => r.route)) : null;
@@ -437,7 +438,7 @@ export function ClimbingAnalysisView({
     const sortedWeeks = [...allWeeks].sort();
     const disciplines = Object.keys(byDisc);
     const rows = sortedWeeks.map(wk => {
-      const row = { week: wk.slice(5) };  // MM-DD
+      const row = { week: fmtMonthDay(wk) };  // MM-DD
       for (const d of disciplines) {
         const e = byDisc[d][wk];
         row[`${d}_rank`]  = e ? e.rank : null;

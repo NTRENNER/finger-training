@@ -90,15 +90,15 @@ export function mixedAdjustmentText(adjustment) {
   if (!adjustment || adjustment.status === 'opening_hold') return null;
   if (adjustment.status === 'unavailable') {
     const reason = {
-      unmeasured_or_interrupted_prefix: 'An earlier hold has incomplete measurements or was recorded as interrupted.',
-      missing_actual_rest: 'The rest between earlier holds was not fully measured.',
+      unmeasured_or_interrupted_prefix: 'An earlier rep has incomplete measurements or was recorded as interrupted.',
+      missing_actual_rest: 'The rest between earlier reps was not fully measured.',
       outside_measured_duration_range: 'This target time is outside the durations measured for this hand.',
       insufficient_fresh_history: 'There is not enough measured history for this hand yet.',
-      invalid_sequence: 'The earlier holds could not be matched to this sequence.',
+      invalid_sequence: 'The earlier reps could not be matched to this sequence.',
     }[adjustment.reason] || 'The available measurements do not support an updated target yet.';
-    return `${reason} Automatic target adjustment is unavailable. Showing the original target weight; it may not match the target time after earlier holds.`;
+    return `${reason} Automatic target adjustment is unavailable. Showing the original target weight; it may not match the target time after earlier reps.`;
   }
-  if (adjustment.status === 'adjusted_reference') return 'New target weight accounts for earlier holds and rest. Hold time is uncertain beyond your measured range; release at failure.';
+  if (adjustment.status === 'adjusted_reference') return 'New target weight accounts for earlier reps and rest. Hold time is uncertain beyond your measured range; release at failure.';
   if (adjustment.status === 'capped_at_original') return `Target weight unchanged. You may hold longer than ${adjustment.target_s}s.`;
   return `New target weight aims for about ${adjustment.target_s}s after the planned rest. Pull steadily at this target until failure; the time is an estimate.`;
 }

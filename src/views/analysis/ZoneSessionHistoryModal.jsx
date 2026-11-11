@@ -217,7 +217,7 @@ export function ZoneSessionHistoryModal({
                       detail={loadDelta}
                     />
                     <Metric
-                      label="Opening hold"
+                      label="Opening rep"
                       value={`${formatSeconds(session.openingActualS)} / ${formatSeconds(session.targetS)}s`}
                       detail={`${ratioPct}% target · ${ratioDelta}`}
                       color={ratioColor}
@@ -241,7 +241,7 @@ export function ZoneSessionHistoryModal({
           lineHeight: 1.4,
           padding: "9px 16px 11px",
         }}>
-          Opening hold is the mean first fresh rep for the selected hand view. Changes compare with the previous workout prescribed in this zone.
+          Opening rep is the mean first fresh rep for the selected hand view. Changes compare with the previous workout prescribed in this zone.
           {measuredOnly ? " Only valid measured-force workouts are included." : ""}
         </div>
       </div>

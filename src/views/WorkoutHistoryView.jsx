@@ -18,7 +18,7 @@
 import React, { useMemo, useState } from "react";
 import { C } from "../ui/theme.js";
 import { Card } from "../ui/components.jsx";
-import { fmt1, toDisp, fmtClock, bwOnDate } from "../ui/format.js";
+import { fmt1, toDisp, fmtClock, bwOnDate, fmtDay } from "../ui/format.js";
 import { ymdLocal } from "../util.js";
 import {
   loadLS, saveLS,
@@ -413,7 +413,7 @@ export function WorkoutHistoryView({
                   <span style={{ fontSize: 11, color: C.muted }}>#{session.sessionNumber}</span>
                 )}
                 <span style={{ fontSize: 12, color: C.muted }}>
-                  {session.date}{session.completedAt ? " · " + fmtClock(session.completedAt) : ""}
+                  {fmtDay(session.date)}{session.completedAt ? " · " + fmtClock(session.completedAt) : ""}
                   {(() => { const e = bwOnDate(bwLog, session.date); return e ? " · " + fmt1(toDisp(e.kg, unit)) + " " + unit : ""; })()}
                 </span>
                 <span

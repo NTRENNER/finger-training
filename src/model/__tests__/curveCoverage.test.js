@@ -45,7 +45,7 @@ test("successful overshoot refreshes the prescribed coverage domain", () => {
 
   expect(coverage.current).toBe(2); // peak + prescribed Strength
   expect(coverage.missing).not.toContain("Strength");
-  expect(coverage.missing).toContain("Strength-Endurance");
+  expect(coverage.missing).toContain("Strength/Endurance");
 });
 
 test("names missing, aging, and stale domains", () => {
@@ -58,8 +58,8 @@ test("names missing, aging, and stale domains", () => {
     current: 2, // peak + aging Power, which still counts until it goes stale
     total: 6,
     aging: ["Power"],
-    stale: ["Power-Strength"],
-    missing: ["Strength", "Strength-Endurance", "Endurance"],
+    stale: ["Power/Strength"],
+    missing: ["Strength", "Strength/Endurance", "Endurance"],
   });
 });
 

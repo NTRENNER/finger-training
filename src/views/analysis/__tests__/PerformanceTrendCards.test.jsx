@@ -107,9 +107,9 @@ test('short chart has individual unconnected points and keyboard-selectable dura
   expect(screen.getByTestId('opening-hold-points')).toHaveAttribute('data-holds', 'hold-4,hold-5');
   fireEvent.change(screen.getByRole('combobox', { name: 'Finger session order' }), { target: { value: 'after_training' } });
   expect(screen.getByTestId('opening-hold-points')).toHaveAttribute('data-holds', 'hold-4');
-  expect(screen.getByText('Showing 1 of 6 comparable opening holds in this date range.')).toBeInTheDocument();
+  expect(screen.getByText('Showing 1 of 6 comparable opening reps in this date range.')).toBeInTheDocument();
   fireEvent.change(screen.getByRole('combobox', { name: 'Finger session order' }), { target: { value: 'first_recorded' } });
-  expect(screen.getByText(/No opening holds match these filters/)).toBeInTheDocument();
+  expect(screen.getByText(/No opening reps match these filters/)).toBeInTheDocument();
   expect(screen.queryByTestId('trend-chart')).not.toBeInTheDocument();
   expect(buildPerformanceObservations).toHaveBeenCalledTimes(1);
 });
@@ -141,7 +141,7 @@ test('grips with no observations do not render empty Scatter series that could i
 test('point details expose the compact comparison fields without a duplicate inspector', () => {
   render(<PerformanceTrendCards history={history} grips={grips} />);
   fireEvent.click(screen.getByTestId('point-hold-4'));
-  const details = screen.getByRole('region', { name: 'Selected opening hold' });
+  const details = screen.getByRole('region', { name: 'Selected opening rep' });
   expect(within(details).getByRole('heading', { name: 'Micro · Left · 2026-08-05' })).toBeInTheDocument();
   expect(within(details).getByText('20.0 kg')).toBeInTheDocument();
   expect(within(details).getByText('25.0 kg')).toBeInTheDocument();
@@ -205,18 +205,18 @@ test('click opens the actual observation and close, escape, or a second click di
   buildPerformanceObservations.mockReturnValue(analysis);
   render(<PerformanceTrendCards history={history} grips={['Micro', 'Crusher']} />);
   fireEvent.click(screen.getByTestId('point-crusher-only'));
-  const popup = screen.getByRole('dialog', { name: 'Opening hold details' });
+  const popup = screen.getByRole('dialog', { name: 'Opening rep details' });
   expect(within(popup).getByRole('heading', { name: 'Crusher · Right · 2026-08-02' })).toBeInTheDocument();
   expect(within(popup).getByText('15.0 kg')).toBeInTheDocument();
   expect(within(popup).getByText('-50.0% versus predicted force')).toBeInTheDocument();
   fireEvent.click(within(popup).getByRole('button', { name: 'Close point details' }));
-  expect(screen.queryByRole('dialog', { name: 'Opening hold details' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: 'Opening rep details' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByTestId('point-crusher-only'));
   fireEvent.keyDown(window, { key: 'Escape' });
-  expect(screen.queryByRole('dialog', { name: 'Opening hold details' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: 'Opening rep details' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByTestId('point-crusher-only'));
   fireEvent.click(screen.getByTestId('point-crusher-only'));
-  expect(screen.queryByRole('dialog', { name: 'Opening hold details' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: 'Opening rep details' })).not.toBeInTheDocument();
 });
 
 test('tapping outside the popup closes it, but tapping inside it or on a point does not', () => {
@@ -224,14 +224,14 @@ test('tapping outside the popup closes it, but tapping inside it or on a point d
   render(<><PerformanceTrendCards history={history} grips={grips} /><p>Elsewhere on the page</p></>);
   const [first, second] = screen.getAllByTestId(/^point-/);
   fireEvent.click(first);
-  const popup = screen.getByRole('dialog', { name: 'Opening hold details' });
+  const popup = screen.getByRole('dialog', { name: 'Opening rep details' });
   fireEvent.pointerDown(within(popup).getByRole('heading'));
-  expect(screen.getByRole('dialog', { name: 'Opening hold details' })).toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: 'Opening rep details' })).toBeInTheDocument();
   fireEvent.pointerDown(second);
   fireEvent.click(second);
-  expect(screen.getByRole('dialog', { name: 'Opening hold details' })).toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: 'Opening rep details' })).toBeInTheDocument();
   fireEvent.pointerDown(screen.getByText('Elsewhere on the page'));
-  expect(screen.queryByRole('dialog', { name: 'Opening hold details' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog', { name: 'Opening rep details' })).not.toBeInTheDocument();
 });
 
 test('hold details respect display units and do not call unknown sessions rested', () => {
@@ -246,5 +246,5 @@ test('hold details respect display units and do not call unknown sessions rested
   expect(screen.queryByText('Expectation source')).not.toBeInTheDocument();
   expect(screen.queryByText(/do not establish this session’s order or your recovery/)).not.toBeInTheDocument();
   view.rerender(<PerformanceObservationDetails observation={null} />);
-  expect(screen.queryByRole('region', { name: 'Selected opening hold' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Selected opening rep' })).not.toBeInTheDocument();
 });

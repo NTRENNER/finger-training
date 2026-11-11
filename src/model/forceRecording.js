@@ -94,14 +94,14 @@ export function isCapacityEvidenceRep(rep) {
 export function evidenceLabel(rep) {
   if (rep?.force_recording?.duration_basis === "elapsed_activity_estimate") return "Interrupted — elapsed activity time is estimated";
   if (rep?.force_recording?.recording_stop_reason === 'release_not_observed' && isValidFailureRep(rep))
-    return "Hold recorded — release not detected; rest and extra work are uncertain";
-  if (isPeakMeasurement(rep)) return isValidPeakMeasurement(rep) ? "Peak measurement — not a failure hold" : "Interrupted peak test — excluded";
+    return "Rep recorded — release not detected; rest and extra work are uncertain";
+  if (isPeakMeasurement(rep)) return isValidPeakMeasurement(rep) ? "Peak measurement — not a failure rep" : "Interrupted peak test — excluded";
   if (!isValidFailureRep(rep)) return "Interrupted — activity only";
-  if (isMixedDomainRep(rep) && mixedDomainMetadata(rep).role === 'fatigued_hold') return "Beta · fatigued hold — recorded separately from fresh capacity";
+  if (isMixedDomainRep(rep) && mixedDomainMetadata(rep).role === 'fatigued_hold') return "Beta · fatigued rep — recorded separately from fresh capacity";
   if (rep.force_recording?.capacity_eligible === false) return "Incomplete failure evidence — activity only";
   if (!isCapacityEvidenceRep(rep)) return "Load is an estimate — activity only";
   if (!rep.load_provenance) return "Legacy evidence — measurement uncertainty";
-  return isMixedDomainRep(rep) ? "Beta · opening hold — valid failure evidence" : "Valid failure evidence";
+  return isMixedDomainRep(rep) ? "Beta · opening rep — valid failure evidence" : "Valid failure evidence";
 }
 
 

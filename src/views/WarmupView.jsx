@@ -418,8 +418,8 @@ export function WarmupView({ visible = true, history, bodyWeightKg, tindeq, unit
         {/* Mode toggle: boulder or route ramp intensity and perfusion duration.
             Persists to LS_WARMUP_MODE_KEY. */}
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {modePill("boulder", "🪨 Bouldering", "Progressive holds and two strength ramps.")}
-          {modePill("route", "🧗 Routes", "Progressive holds and two lighter strength ramps.")}
+          {modePill("boulder", "🪨 Bouldering", "Progressive reps and two strength ramps.")}
+          {modePill("route", "🧗 Routes", "Progressive reps and two lighter strength ramps.")}
         </div>
         {['Crusher', 'Micro'].map(grip => <Toggle key={grip} label={`${grip} Max Test`}
           checked={peakTestGrips.includes(grip)} disabled={!protocol.availablePeakGrips?.includes(grip)}
