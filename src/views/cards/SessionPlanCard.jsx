@@ -1121,6 +1121,13 @@ export function SessionPlanCard({
       {/* (Hangs + Rest sliders removed June 2026 — protocol-driven;
           see the comment at the reps/rest derivation above.) */}
 
+      {/* Start sits directly under today's plan, above the list of
+          alternatives, so it is reachable without scrolling past them. */}
+      {hand === 'Both' && <p style={{ fontSize: 12, color: C.muted, marginTop: 16 }}>
+        Today starts with your {startingHandForDay(history, ymdLocal()) === 'L' ? 'left' : 'right'} hand.
+      </p>}
+      {plannerFooter}
+
       {/* Five full-width training choices. Tap any tile to override the
           recommended pick for this session; the active session block
           above updates immediately to reflect the new target T and
@@ -1129,7 +1136,7 @@ export function SessionPlanCard({
           Loads on every tile reflect the RPE slider's per-zone scale-
           down so the user sees the trade-off across the full curve.
           Peak measurements are available in warmup. */}
-      <><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, marginBottom: 10 }}>Choose a different session</div>
+      <><div style={{ fontSize: 12, fontWeight: 600, color: C.muted, margin: "24px 0 10px" }}>Choose a different session</div>
       <div className="session-choice-grid">
         {rows.filter(r => TRAINING_ZONE_KEYS.includes(r.key)).map(r => {
           // Tile is "active" only when it's the user's override pick.
@@ -1220,10 +1227,6 @@ export function SessionPlanCard({
         {" "}Alternate hands for three rounds. Records peak force; no target load or failure rep.
       </div>}
       </>
-      {hand === 'Both' && <p style={{ fontSize: 12, color: C.muted, marginTop: 16 }}>
-        Today starts with your {startingHandForDay(history, ymdLocal()) === 'L' ? 'left' : 'right'} hand.
-      </p>}
-      {plannerFooter}
     </Card>
   );
 }
