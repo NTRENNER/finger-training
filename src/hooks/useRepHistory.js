@@ -61,6 +61,9 @@ const repMatchKey = (r) =>
 // a cloud rep WITH an id can still match when they describe the
 // same workout slot. Without this, the May 2026 duplicate-storm
 // bug fired every time auth re-initialized.
+// How long after a local change cancels a sync before the sync runs again.
+export const RESYNC_AFTER_LOCAL_CHANGE_MS = 1500;
+
 const compositeKey = (r) =>
   `${r.session_id || r.date}|${r.set_num}|${r.rep_num}|${r.hand}`;
 
@@ -283,9 +286,40 @@ export function useRepHistory({
   // request, local edit, or account change invalidates older responses before
   // UI writes. A cloud snapshot must never overwrite work saved during IO.
   const refreshGeneration = useRef(0);
-  const cancelRefresh = useCallback(() => { refreshGeneration.current++; }, []);
+  const refreshesInFlight = useRef(0);
+  const resyncTimer = useRef(null);
+  const [resyncSignal, setResyncSignal] = useState(0);
+  // Account change or unmount: drop the response and any planned re-run.
+  const abandonRefresh = useCallback(() => {
+    refreshGeneration.current++;
+    clearTimeout(resyncTimer.current);
+    resyncTimer.current = null;
+  }, []);
+  // A local change: drop the response, then sync again shortly. Without the
+  // re-run a cancelled sync left historySynced false, and the cloud unmerged,
+  // until some later sync happened to finish. Several changes in a row (a
+  // session edit touches many reps) share one re-run.
+  const cancelRefresh = useCallback(() => {
+    refreshGeneration.current++;
+    if (refreshesInFlight.current === 0 && resyncTimer.current == null) return;
+    clearTimeout(resyncTimer.current);
+    resyncTimer.current = setTimeout(() => {
+      resyncTimer.current = null;
+      setResyncSignal(n => n + 1);
+    }, RESYNC_AFTER_LOCAL_CHANGE_MS);
+  }, []);
   const refreshHistory = useCallback(async () => {
     if (!user) return false;
+    refreshesInFlight.current++;
+    try {
+      return await runRefresh();
+    } finally {
+      refreshesInFlight.current--;
+    }
+    // runRefresh is declared below and only called after render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+  const runRefresh = useCallback(async () => {
     const generation = ++refreshGeneration.current;
     const cancelled = () => generation !== refreshGeneration.current;
     setHistorySynced(false);
@@ -459,12 +493,12 @@ export function useRepHistory({
     }
 
     return false;
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     refreshHistory().catch(error => console.warn("Rep sync:", error?.message));
-    return cancelRefresh;
-  }, [refreshHistory, syncSignal, cancelRefresh]);
+    return abandonRefresh;
+  }, [refreshHistory, syncSignal, resyncSignal, abandonRefresh]);
 
   // Refresh existing workouts as well as new ones. Pending edits stay local
   // until their exact contents have been acknowledged by the server.

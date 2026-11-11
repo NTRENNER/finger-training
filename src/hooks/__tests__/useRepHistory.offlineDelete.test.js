@@ -225,3 +225,25 @@ test('an older manual refresh cannot replace the latest completed refresh', asyn
   await act(async () => { release([a]); await older; });
   expect(result.current.history[0].actual_time_s).toBe(55);
 });
+
+// Regression: a local change cancels the sync in flight so its older
+// snapshot cannot overwrite the change. The cancelled sync never ran again,
+// so the app stayed "not synced" (Volume Beta not ready, baseline pinning
+// held back) until some later sync happened to complete.
+test('a sync cancelled by a saved rep runs again and ends synced', async () => {
+  const a = rep('rep-a', 1), fresh = rep('rep-new', 2);
+  saveLS(LS_HISTORY_KEY, [a]);
+  let release;
+  sync.fetchReps.mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
+  sync.fetchReps.mockResolvedValue([fresh, a]);
+  const { result } = renderHook(() => useRepHistory({ user, syncSignal: 0 }));
+  await waitFor(() => expect(sync.fetchReps).toHaveBeenCalledTimes(1));
+
+  act(() => result.current.addReps([fresh]));
+  await act(async () => { release([a]); });
+  expect(result.current.historySynced).toBe(false);
+
+  await waitFor(() => expect(result.current.historySynced).toBe(true), { timeout: 4000 });
+  expect(sync.fetchReps).toHaveBeenCalledTimes(2);
+  expect(result.current.history.map(r => r.id)).toEqual(['rep-new', 'rep-a']);
+});
