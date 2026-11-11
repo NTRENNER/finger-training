@@ -9,6 +9,7 @@ import {
   LS_WORKOUT_DELETED_KEY,
   LS_WORKOUT_LOG_KEY,
   LS_WORKOUT_SYNCED_KEY,
+  loadLS,
 } from "../lib/storage.js";
 import { LS_QUEUE_KEY, LS_UPDATE_QUEUE_KEY } from "../lib/sync.js";
 
@@ -44,6 +45,22 @@ export function countPendingSyncChanges({
     + listLength(dailyStateDirty)
     + settingsCount
     + unsyncedWorkouts;
+}
+
+// Same count, read straight from storage. For callers outside React's
+// render cycle, such as the foreground-sync check in useConnectivity.
+export function readPendingSyncCount() {
+  return countPendingSyncChanges({
+    repAdds: loadLS(LS_QUEUE_KEY),
+    repUpdates: loadLS(LS_UPDATE_QUEUE_KEY),
+    activityDirty: loadLS(LS_ACTIVITY_DIRTY_KEY),
+    bodyWeightDirty: loadLS(LS_BW_DIRTY_KEY),
+    dailyStateDirty: loadLS(LS_DAILY_STATE_DIRTY_KEY),
+    settingsPatch: loadLS(LS_USER_SETTINGS_PATCH_KEY),
+    workoutLog: loadLS(LS_WORKOUT_LOG_KEY),
+    workoutSynced: loadLS(LS_WORKOUT_SYNCED_KEY),
+    workoutDeleted: loadLS(LS_WORKOUT_DELETED_KEY),
+  });
 }
 
 export function usePendingSyncCount() {
