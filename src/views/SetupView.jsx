@@ -60,6 +60,13 @@ import { GripCoverageSelector } from "./cards/GripCoverageSelector.jsx";
 // SETUP VIEW
 // ────────────────────────────────────────────────────────────────
 
+// Shared defaults. A literal [] or {} default is a new object on every
+// render; the plan card reads these props in effect dependencies, so a fresh
+// one each time made it re-apply its plan to the config without end.
+const NO_ACTIVITIES = [];
+const NO_GOALS = {};
+const NO_GRIPS = [];
+
 export function SetupView({
   config, setConfig, onStart, history,
   freshMap = null,
@@ -72,9 +79,9 @@ export function SetupView({
   // log for adaptive RPE). Climb capture moved to the Climb tab in
   // late May 2026; SetupView no longer owns the logging surface, so
   // onLogActivity isn't accepted here anymore.
-  activities = [],
+  activities = NO_ACTIVITIES,
   connectSlot = null,
-  GOAL_CONFIG = {}, GRIP_PRESETS = [],
+  GOAL_CONFIG = NO_GOALS, GRIP_PRESETS = NO_GRIPS,
   // Cloud-synced training-goal bias for the coaching engine
   // ("balanced" default; bouldering / power_endurance / endurance).
   // Threaded to SessionPlanCard which passes it to the engine.
