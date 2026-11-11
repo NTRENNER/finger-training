@@ -37,7 +37,7 @@ import {
 } from "../lib/storage.js";
 import {
   pushRep, fetchReps, enqueueReps, flushQueue,
-  pushRepTombstones, fetchRepTombstoneIds,
+  pushRepTombstones, fetchRepTombstoneIds, deleteRepsByIds,
   pushRepSlotTombstones, fetchRepSlotTombstoneKeys,
   fetchSessionTombstoneIds,
   enqueueRepUpdate, applyPendingUpdates, flushUpdateQueue,
@@ -353,6 +353,26 @@ export function useRepHistory({
         if (cloudTombstones && cloudTombstones.length > 0) {
           saveLS(LS_REP_DELETED_KEY, [...tombstoned]);
         }
+        // Finish deletes that could not reach the cloud (made offline, or
+        // the request failed). deleteRep / deleteSession try the cloud
+        // once; this is the retry. Two leftovers are possible: the id
+        // tombstone never reached the cloud, and the row itself is still
+        // there. Both are safe to repeat, and a failure here is simply
+        // retried on the next reconcile because the local tombstone stays.
+        if (cloudTombstones) {
+          const inCloud = new Set(cloudTombstones);
+          const unsynced = (loadLS(LS_REP_DELETED_KEY) || []).filter(id => !inCloud.has(id));
+          if (unsynced.length > 0) await pushRepTombstones(unsynced);
+        }
+        const undeleted = remote.filter(r => r.id && tombstoned.has(r.id));
+        if (undeleted.length > 0) {
+          await deleteRepsByIds(undeleted.map(r => r.id));
+          await pushRepSlotTombstones(undeleted
+            .filter(r => r.session_id != null && r.set_num != null && r.rep_num != null && r.hand)
+            .map(r => ({ session_id: r.session_id, set_num: r.set_num, rep_num: r.rep_num, hand: r.hand })));
+        }
+        if (cancelled) return;
+
         const toSync = localReps.filter(r =>
           !(r.id && remoteIds.has(r.id)) &&
           !remoteCompositeKeys.has(compositeKey(r)) &&

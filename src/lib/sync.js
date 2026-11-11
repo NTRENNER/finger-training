@@ -845,6 +845,22 @@ export async function pushRepTombstones(ids) {
   }
 }
 
+// Delete rep rows by id. Used by reconcile to finish deletes that were made
+// offline: the row is still in the cloud although its id is tombstoned on
+// this device. Returns false on error so the next reconcile tries again.
+export async function deleteRepsByIds(ids) {
+  const valid = (ids || []).filter(Boolean);
+  if (valid.length === 0) return true;
+  try {
+    const { error } = await supabase.from("reps").delete().in("id", valid);
+    if (error) { console.warn("Supabase deleteRepsByIds:", error.message); return false; }
+    return true;
+  } catch (e) {
+    console.warn("Supabase deleteRepsByIds exception:", e.message);
+    return false;
+  }
+}
+
 // Fetch every tombstoned id. Used by reconcile to union with the
 // local tombstone set before deciding which local reps to push.
 // Returns null on error so the caller can fall back to local-only
