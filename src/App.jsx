@@ -325,7 +325,7 @@ export default function App() {
     currentSet, currentRep,
     sessionId, refWeights,
     sessionReps, lastRepResult, retryTargetKg, canRedoLastRep, handleRedoLastRep,
-    leveledUp, newLevel,
+    leveledUp, newLevel, awards,
     activeHand,
     nextWeight,
     startSession, chooseOffset, handleRepDone,
@@ -760,9 +760,11 @@ export default function App() {
               config={config}
               leveledUp={leveledUp}
               newLevel={newLevel}
+              awards={awards}
               currentSet={currentSet}
               onAddSet={handleNextSet}
               history={history}
+              refWeights={refWeights}
               onDone={() => setPhase("idle")}
               unit={unit}
             />

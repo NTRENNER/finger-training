@@ -51,6 +51,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { today, uid, uuid, nowISO } from "../util.js";
 import { calcLevel } from "../model/levels.js";
+import { sessionAwards } from "../model/sessionAwards.js";
 import { zoneOf } from "../model/zones.js";
 // Runtime fatigue accumulator was retired — no view ever consumed it
 // and the historical pipeline (freshMap / three-exp fit / prescription
@@ -171,6 +172,7 @@ export function useSessionRunner({
   const [lastRepResult, setLastRepResult] = useState(null);
   const [leveledUp,   setLeveledUp]   = useState(false);
   const [newLevel,    setNewLevel]    = useState(1);
+  const [awards,      setAwards]      = useState([]);
   const firstHandRef = useRef("L");
   const [activeHand,  setActiveHand]  = useState("L"); // tracks current hand in Both mode
   // Per-session manual-timing offset opt-in (see MANUAL_OFFSET_S).
@@ -339,6 +341,7 @@ export function useSessionRunner({
     setCurrentSet(1);
     setCurrentRep(0);
     setLeveledUp(false);
+    setAwards([]);
     setLastRepResult(null);
     setActiveHand(cfg.hand === "Both" ? firstHandRef.current : cfg.hand);
     setManualOffset(false);
@@ -382,6 +385,16 @@ export function useSessionRunner({
     }
     setLeveledUp(leveled);
     setNewLevel(maxNewLevel);
+    // Curve, recommendation and recovery awards are judged on set one, so they
+    // are shown once, when that set finishes. Awards must never block saving.
+    let earned = [];
+    if (!config.mixedDomainPlan && !config.peakTest && allReps.every(r => (r.set_num ?? 1) === 1)) {
+      try {
+        earned = sessionAwards({ before, reps: allReps, grip: config.grip, targetTime: config.targetTime,
+          hands, restSeconds: config.restTime ?? 20 }).filter(a => a.type !== "heaviest");
+      } catch { earned = []; }
+    }
+    setAwards(earned);
     setPhase("done");
   }, [config, history]);
 
@@ -407,6 +420,7 @@ export function useSessionRunner({
     setActiveHand(nextHand);
     setLastRepResult(null);
     setLeveledUp(false);
+    setAwards([]);
     setSetOpeningRestS(300);
     if (volumePlanRef.current || mixed || config.plannedSets > 1) {
       beginSetRest(nextHand, config.plannedSets > 1);
@@ -615,11 +629,6 @@ export function useSessionRunner({
       recordedForce.prediction_check = completePrediction(regularPrediction, mixedPrefix, repRecord);
     }
 
-    // prescribedWeight rides along for the RestView's over-pull check
-    // (July 2026, per Nathan): with a spring/anchor setup the user
-    // controls the pull, and pulling well over prescription is what
-    // collapsed the June sessions (e.g. 2026-06-19: 70.5 lb prescribed,
-    // 83 lb pulled, reps 2+ died at 15-30s).
     setLastRepResult({
       actualTime: adjTime, avgForce, peakForce, failureValid, endReason,
       forceRecording: recordedForce, restBefore, loadProvenance: provenance,
@@ -628,7 +637,6 @@ export function useSessionRunner({
       restStartedAtMs: attemptRecording?.recording_stop_reason === 'release' && Number.isFinite(adjustedEnd)
         ? Math.min(Date.now(), adjustedEnd) : Date.now(),
       targetTime: repTargetTime,
-      prescribedWeight: roundedPrescribed,
     });
     setSessionReps(reps => [...reps, repRecord]);
     // Keep the physical last activity endpoint, not the earlier credited
@@ -705,6 +713,7 @@ export function useSessionRunner({
     setRetryTargetKg(rep.manual_load_kg > 0 ? rep.manual_load_kg : null);
     setLastRepResult(null);
     setLeveledUp(false);
+    setAwards([]);
     repDoneLockRef.current = false;
     setPhase('rep_ready');
     return true;
@@ -771,7 +780,7 @@ export function useSessionRunner({
     currentRep,
     sessionId, sessionStartedAt, refWeights,
     sessionReps, lastRepResult, retryTargetKg, canRedoLastRep, handleRedoLastRep,
-    leveledUp, newLevel,
+    leveledUp, newLevel, awards,
     activeHand,
     nextWeight,
     startSession, chooseOffset, handleRepDone,

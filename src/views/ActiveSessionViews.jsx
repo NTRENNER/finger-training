@@ -41,7 +41,6 @@ import { downloadCSV } from "../lib/csv.js";
 import { buildRepCurveBundle, buildPhysModel, isComparableHold } from "../model/repCurveData.js";
 import { RepCurveChart } from "./cards/RepCurveChart.jsx";
 import { buildRecoveryBundle } from "../model/recoveryDynamics.js";
-import { sessionOverpull } from "../model/overpull.js";
 import { RecoveryChart } from "./cards/RecoveryChart.jsx";
 import { MAX_OPTIONAL_SETS, recommendAnotherSet, isSetComplete } from "../model/setRecommendation.js";
 import { isVolumeSetComplete } from "../model/volumeSession.js";
@@ -139,15 +138,26 @@ function LiveRecoveryCard({ history, config, currentSet = 1, activeHand, session
   return embedded ? inner : <Card style={{ marginBottom: 12 }}>{inner}</Card>;
 }
 
-function RestHoldTimeChart({ context, unit = 'lbs' }) {
+function RestHoldTimeChart({ context, unit = 'lbs', title = 'Hold times' }) {
   if (!context) return null;
   return <Card>
-    <Label>Hold times — actual, estimated and previous</Label>
+    <Label>{title} — actual, estimated and previous</Label>
     {context.config.mixedDomainPlan
       ? <p>Hold-time comparison unavailable for mixed-duration sets.</p>
       : <LiveRepCurveCard {...context} unit={unit} embedded showLegend />}
   </Card>;
 }
+
+// Session awards other than the level-up (see model/sessionAwards.js).
+const pctOver = ratio => `${Math.round((ratio - 1) * 100)}%`;
+const AWARD_COPY = [
+  { type: "curve", emoji: "📈", title: "Beat your curve",
+    line: a => `${pctOver(a.ratio)} more force than your curve expected` },
+  { type: "recommendation", emoji: "🎯", title: "Beat the recommendation",
+    line: a => `held ${pctOver(a.timeRatio)} longer at the recommended weight` },
+  { type: "recovery", emoji: "🔋", title: "Strong recovery",
+    line: () => "second hold lasted longer than expected" },
+];
 
 // Level display — numeric only, no old badge names. Used by
 // SessionSummaryView's level-up animation.
@@ -798,27 +808,6 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
 
       <RestHoldTimeChart context={curveContext} unit={unit} />
 
-      {/* OVER-PULL WARNING (July 2026, per Nathan). Spring/anchor
-          setups let the user pull whatever they like — and pulling
-          well over the prescribed load is what quietly collapsed the
-          June 2026 sessions (opener at +18% looks strong, then reps
-          2+ die at 15-30s and the session's stimulus lands in the
-          wrong zone). Flag it during rest, when there's still time to
-          ease off for the remaining reps. Threshold 110%: the same
-          ~10% grid the ladder's steps use; ordinary Tindeq noise sits
-          well inside it. */}
-      {!nextDomain && lastRep && lastRep.prescribedWeight > 0 && lastRep.avgForce > lastRep.prescribedWeight * 1.1 && !isLastRepInSet && (
-        <Card style={{ borderColor: C.orange }}>
-          <div style={{ fontSize: 13, color: C.orange, fontWeight: 700, marginBottom: 4 }}>
-            Pulling {Math.round((lastRep.avgForce / lastRep.prescribedWeight - 1) * 100)}% over prescription
-          </div>
-          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
-            Avg {fmtW(lastRep.avgForce, unit)} {unit} vs {fmtW(lastRep.prescribedWeight, unit)} {unit} prescribed.
-            Heavier feels strong on rep 1, but the next reps won't recover in {restSeconds}s — ease off toward the prescription to keep the set in its zone.
-          </div>
-        </Card>
-      )}
-
       {lastRep && (
         <Card>
           <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Last rep result</div>
@@ -998,9 +987,12 @@ export function BetweenSetRestView({ startedAtMs, restSeconds = 300, hand = 'L',
 // single switch.)
 
 export function SessionSummaryView({
-  reps, config, leveledUp, newLevel, currentSet = 1, onAddSet, onDone,
-  history = [], unit = "lbs",
+  reps, config, leveledUp, newLevel, awards = [], currentSet = 1, onAddSet, onDone,
+  history = [], unit = "lbs", refWeights = null,
 }) {
+  const summaryHands = useMemo(() => [...new Set(reps
+    .filter(r => (r.set_num ?? 1) === currentSet && (r.hand === 'L' || r.hand === 'R'))
+    .map(r => r.hand))], [reps, currentSet]);
   const sets = useMemo(() => {
     const groups = {};
     for (const r of reps) {
@@ -1052,26 +1044,36 @@ export function SessionSummaryView({
         </Card>
       )}
 
+      {AWARD_COPY.map(({ type, emoji, title, line }) => {
+        const earned = awards.filter(a => a.type === type);
+        return earned.length ? (
+          <Card key={type} style={{ background: "#1c1f0a", borderColor: C.green, marginBottom: 20 }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 36 }}>{emoji}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: C.green }}>{title}</div>
+              {earned.map(a => (
+                <div key={a.hand} style={{ fontSize: 13, color: C.muted, marginTop: 6 }}>
+                  {a.hand === "R" ? "Right" : "Left"} hand: {line(a)}
+                </div>
+              ))}
+            </div>
+          </Card>
+        ) : null;
+      })}
+
       <h2 style={{ margin: "0 0 16px", fontSize: 22 }}>
         {setComplete ? (volume && currentSet === 2 ? 'Volume Beta Complete' : config.mixedDomainPlan ? `Chaos Machine · Set ${currentSet} Complete` : currentSet === 1 ? "Recommended Set Complete" : `Set ${currentSet} Complete`) : "Session Ended Early"}
       </h2>
       {!volume && config.plannedSets > 1 && <p style={{ color: C.muted }}>{config.plannedSets} sets per hand selected. Continue when ready, or finish today.</p>}
       {config.mixedDomainPlan && <p>Chaos Machine (Beta). Only eligible opening holds from set one can update the curve; later holds and sets are recorded as fatigued work. Your regular rep progression is unchanged.</p>}
 
-      {(() => {
-        const op = sessionOverpull(reps);
-        return op.isOver ? (
-          <Card style={{ borderColor: C.orange, marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.orange, marginBottom: 4 }}>
-              You trained ~{op.pct}% over the target weight
-            </div>
-            <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
-              Next time, hold the prescribed load to failure. The model learns from where
-              you actually fail, so staying on target gives cleaner data and better progress.
-            </div>
-          </Card>
-        ) : null;
-      })()}
+      {/* The same hold-time chart the rest screens show, one per hand
+          trained in the set just finished. */}
+      {!config.mixedDomainPlan && summaryHands.map(hand => (
+        <RestHoldTimeChart key={hand} unit={unit}
+          title={summaryHands.length > 1 ? `Hold times · ${hand === 'R' ? 'right' : 'left'} hand` : 'Hold times'}
+          context={{ history, config, currentSet, activeHand: hand, sessionReps: reps, refWeights }} />
+      ))}
 
       <Card>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, textAlign: "center" }}>

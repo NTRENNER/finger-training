@@ -1,6 +1,8 @@
 import React from 'react';
 import { act, render, screen, fireEvent } from '@testing-library/react';
 import { BetweenSetRestView, SessionSummaryView } from '../ActiveSessionViews.jsx';
+beforeAll(() => { global.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }; });
+afterAll(() => { delete global.ResizeObserver; });
 beforeEach(() => jest.useFakeTimers().setSystemTime(1000000));
 afterEach(() => jest.useRealTimers());
 
@@ -63,6 +65,26 @@ test('valid short holds offer only the planned second set', () => {
   expect(add).toHaveBeenCalledTimes(1);
   expect(screen.queryByText(/Add another set/)).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Finish today' })).toBeInTheDocument();
+});
+test('the set summary shows the hold-times chart, one per hand trained', () => {
+  const view = render(<SessionSummaryView config={config} reps={rows(1)} onDone={() => {}} />);
+  expect(screen.getByText(/^Hold times — actual, estimated and previous/)).toBeInTheDocument();
+  view.unmount();
+  const both = [...rows(1), ...rows(1).map(r => ({ ...r, id: `R${r.id}`, hand: 'R' }))];
+  render(<SessionSummaryView config={{ ...config, hand: 'Both' }} reps={both} onDone={() => {}} />);
+  expect(screen.getByText(/^Hold times · left hand/)).toBeInTheDocument();
+  expect(screen.getByText(/^Hold times · right hand/)).toBeInTheDocument();
+});
+test('the set summary names each award earned, per hand', () => {
+  render(<SessionSummaryView config={config} reps={rows(1)} onDone={() => {}} awards={[
+    { type: 'recommendation', hand: 'L', loadRatio: 1.06, timeRatio: 1.31 },
+    { type: 'recommendation', hand: 'R', loadRatio: 1.05, timeRatio: 1.38 },
+    { type: 'recovery', hand: 'L', gap: 0.2 }]} />);
+  expect(screen.getByText('Beat the recommendation')).toBeInTheDocument();
+  expect(screen.getByText('Left hand: held 31% longer at the recommended weight')).toBeInTheDocument();
+  expect(screen.getByText('Right hand: held 38% longer at the recommended weight')).toBeInTheDocument();
+  expect(screen.getByText('Strong recovery')).toBeInTheDocument();
+  expect(screen.queryByText('Beat your curve')).not.toBeInTheDocument();
 });
 test.each([[rows(1).slice(0, 3)], [rows(1).map((r, i) => i === 1 ? { ...r, failure_valid: false } : r)]])('incomplete or interrupted sets do not offer set two', reps => {
   render(<SessionSummaryView config={config} reps={reps} onAddSet={() => {}} onDone={() => {}} />);
