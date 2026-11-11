@@ -1,6 +1,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { useSessionRunner } from '../useSessionRunner.js';
 jest.mock('../../lib/sync.js', () => ({ pushDailyState: jest.fn() }));
+// A started session saves its place for resume; each test starts clean.
+beforeEach(() => localStorage.clear());
 const cfg = { grip: 'Micro', hand: 'L', targetTime: 30, repsPerSet: 4, restTime: 20, plannedLoadByHand: { L: 20 } };
 test.each(['mixedDomainPlan', 'volumePlan'])('stale %s cannot start without qualifying history', field => {
   const onSessionStart = jest.fn();

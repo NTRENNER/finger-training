@@ -285,6 +285,10 @@ export function useRepHistory({
   // Automatic and manual refresh use the same reconciliation. A newer
   // request, local edit, or account change invalidates older responses before
   // UI writes. A cloud snapshot must never overwrite work saved during IO.
+  // Slot tombstones last seen in the cloud. A rep must never be placed in
+  // one of these slots: the server refuses the insert and the next sync
+  // drops the local copy.
+  const cloudSlotTombstones = useRef(new Set());
   const refreshGeneration = useRef(0);
   const refreshesInFlight = useRef(0);
   const resyncTimer = useRef(null);
@@ -347,6 +351,7 @@ export function useRepHistory({
       fetchSessionTombstoneIds(),
     ]);
     if (cancelled()) return false;
+    if (cloudSlotKeys) cloudSlotTombstones.current = new Set(cloudSlotKeys);
     const slotTombSet    = new Set([...(cloudSlotKeys || []), ...pendingRepSlotDeletions().map(repSlotKey)]);
     const sessionTombSet = new Set(cloudSessionIds  || []);
 
@@ -625,10 +630,15 @@ export function useRepHistory({
     if (movingHand) {
       const sessKey = rep.session_id || rep.date;
       const setNum = rep.set_num ?? 1;
-      const nextRepNum = 1 + (history || []).reduce((m, r) =>
+      let nextRepNum = 1 + (history || []).reduce((m, r) =>
         ((r.session_id || r.date) === sessKey && (r.set_num ?? 1) === setNum
           && r.hand === updates.hand)
           ? Math.max(m, r.rep_num || 0) : m, 0);
+      // Skip slots that were deleted before. Moving a rep away and back
+      // would otherwise land it in the slot its own first move tombstoned.
+      const deadSlots = new Set([...cloudSlotTombstones.current, ...pendingRepSlotDeletions().map(repSlotKey)]);
+      const slotAt = n => repSlotKey({ ...rep, set_num: setNum, rep_num: n, hand: updates.hand });
+      while (deadSlots.has(slotAt(nextRepNum))) nextRepNum++;
       const moved = { ...rep, ...updates, id: genRepId(), set_num: setNum, rep_num: nextRepNum };
       await deleteRep(rep);   // id + slot tombstone the vacated (…, old hand)
       addReps([moved]);       // fresh id + slot at (…, new hand)

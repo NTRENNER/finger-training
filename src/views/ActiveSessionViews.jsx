@@ -265,6 +265,13 @@ export function LastRepRedo({ onRedo, tindeq }) {
     padding: '8px 12px', fontSize: 12, cursor: 'pointer' }}>Redo last rep</button>;
 }
 
+// During a rep the screen shows only live weight, average weight, time,
+// target weight and target time. Anything else is hidden but keeps its
+// space, so nothing moves when a rep starts or ends.
+function HiddenDuringRep({ active, children }) {
+  return <div aria-hidden={active || undefined} style={active ? { visibility: "hidden" } : undefined}>{children}</div>;
+}
+
 function RepDots({ total, done, current }) {
   return (
     <div style={{ display: "flex", gap: 8, justifyContent: "center", margin: "16px 0" }}>
@@ -571,8 +578,10 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
       </div>
 
       {startError && repPhase === "ready" && <p role="alert" style={{ color: C.red }}>{startError}</p>}
-      <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
-      <MixedHoldInfo config={config} currentRep={currentRep} />
+      <HiddenDuringRep active={repPhase === "active"}>
+        <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
+        <MixedHoldInfo config={config} currentRep={currentRep} />
+      </HiddenDuringRep>
 
       {/* Phase cards (countdown / timer / ready) render FIRST so the
           timer never scrolls below the fold mid-rep — the live charts
@@ -597,7 +606,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
         <Card>
           <BigTimer seconds={Number(creditedSeconds(tindeq.forceLoss, elapsed))} targetSeconds={config.targetTime} running={tindeq.forceLoss?.status !== 'complete' && tindeq.forceLoss?.pendingEndTs == null} referenceOnly={!!config.mixedDomainPlan} showTarget={false} />
           <ForceGauge force={liveSignal ? tindeq.force : null} avg={liveSignal ? tindeq.avgForce : null} peak={liveSignal ? tindeq.peak : null} targetKg={targetKg} unit={unit}
-            showUnavailable={tindeq.signalRecovering}
+            showUnavailable={tindeq.signalRecovering} showSecondary={false}
             targetTime={fmtTime(config.targetTime)} targetTimeLabel={config.mixedDomainPlan ? "Fresh reference" : "Target time"} />
         </Card>
       )}
@@ -671,8 +680,9 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
           1's actual time once it lands so the forecast tracks the
           user's actual capacity for this session. Rendered below the
           timer + controls so the clock stays on-screen during a hang;
-          these are between-rep reading material. */}
-      <div style={{ marginTop: 12 }}>
+          these are between-rep reading material, so they are not drawn
+          while a rep is running. */}
+      {repPhase !== "active" && <div style={{ marginTop: 12 }}>
         <LiveRepCurveCard
           history={history}
           config={config}
@@ -690,7 +700,7 @@ export function ActiveSessionView({ session, onRepDone, onAbort, tindeq, autoSta
           activeHand={activeHand}
           sessionReps={sessionReps}
         />
-      </div>
+      </div>}
       {interruptPrompt.show && (
         <InterruptPrompt
           tindeq={tindeq}
@@ -1332,13 +1342,14 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
         <Btn small color={C.red} onClick={() => finishAttempt({ endSession: true })}>End Session</Btn>
       </div>
 
-      <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
-      <MixedHoldInfo config={config} currentRep={currentRep} />
+      <HiddenDuringRep active={repActive}>
+        <RepDots total={config.repsPerSet} done={currentRep} current={currentRep} />
+        <MixedHoldInfo config={config} currentRep={currentRep} />
+      </HiddenDuringRep>
       {startError && !repActive && <div role="alert" style={{ color: C.red }}>
         <p>{startError}</p>
         <Btn onClick={() => setStreamAttempt(attempt => attempt + 1)}>Retry Tindeq</Btn>
       </div>}
-      {repActive && <Btn onClick={() => finishAttempt({ explicit: true })}>Rep interrupted</Btn>}
 
       {/* Status card first — the big hold timer must never scroll
           below the fold mid-rep. Live charts moved below the force
@@ -1357,7 +1368,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
                 the targets never disappear mid-hold. */}
             <ForceGauge force={liveSignal ? tindeq.force : null} avg={liveSignal ? tindeq.avgForce : null}
               peak={liveSignal ? tindeq.peak : null} targetKg={targetKg} unit={unit}
-              showUnavailable={tindeq.signalRecovering}
+              showUnavailable={tindeq.signalRecovering} showSecondary={false}
               targetTime={`${config.targetTime}s`} targetTimeLabel={timeLabel === 'Target' ? 'Target time' : timeLabel} />
           </>
         ) : (
@@ -1390,6 +1401,12 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
         )}
       </Card>
 
+      {/* Below the timer card, so it never pushes the timer down when a
+          rep starts. */}
+      {repActive && <div style={{ marginTop: 12 }}>
+        <Btn onClick={() => finishAttempt({ explicit: true })}>Rep interrupted</Btn>
+      </div>}
+
       {!repActive && <details style={{ marginTop: 12 }}>
         <summary style={{ cursor: 'pointer', color: C.blue }}>Adjust target weight</summary>
         <label style={{ display: 'block', marginTop: 12 }}>
@@ -1420,8 +1437,9 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
 
 
       {/* Live rep-curve preview (same component as the manual flow) —
-          below the timer + gauge so the clock stays on-screen. */}
-      <div style={{ marginTop: 12 }}>
+          below the timer + gauge so the clock stays on-screen. Not drawn
+          while a rep is running. */}
+      {!repActive && <div style={{ marginTop: 12 }}>
         <LiveRepCurveCard
           history={history}
           config={config}
@@ -1439,7 +1457,7 @@ export function AutoRepSessionView({ session, onRepDone, onAbort, tindeq, visibl
           activeHand={activeHand}
           sessionReps={sessionReps}
         />
-      </div>
+      </div>}
       {interruptPrompt.show && (
         <InterruptPrompt
           tindeq={tindeq}

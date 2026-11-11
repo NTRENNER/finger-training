@@ -1,4 +1,4 @@
-import { loadLS, saveLS, LS_REP_SLOT_DELETE_QUEUE_KEY } from './storage.js';
+import { loadLS, saveLS, getStorageUserId, LS_REP_SLOT_DELETE_QUEUE_KEY } from './storage.js';
 import { pushRepSlotTombstones, repSlotKey } from './sync.js';
 
 export function pendingRepSlotDeletions() {
@@ -21,9 +21,12 @@ let flushing = null;
 export function flushRepSlotDeletions() {
   if (flushing) return flushing;
   flushing = (async () => {
+    const owner = getStorageUserId();
     const batch = pendingRepSlotDeletions();
     if (!batch.length) return;
-    if (await pushRepSlotTombstones(batch)) {
+    // The queue is per account. If the account changed during the upload,
+    // leave both queues alone; the original owner's is retried later.
+    if (await pushRepSlotTombstones(batch) && getStorageUserId() === owner) {
       const acknowledged = new Set(batch.map(repSlotKey));
       // A concurrent deletion may have queued a different slot during IO.
       saveLS(LS_REP_SLOT_DELETE_QUEUE_KEY,

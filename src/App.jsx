@@ -1,12 +1,11 @@
 import { syncWorkoutSessions } from './lib/workoutSync.js';
 import { detectPlateaus, plateauEnrollmentEvidence } from './model/plateau.js';
 import { betaEligibility } from './model/betaEligibility.js';
-import { ResearchView } from "./views/ResearchView.jsx";
 import { PeakTestView } from './views/PeakTestView.jsx';
 // src/App.js  — Finger Training v3
 // Rep-based sessions · Three-exp F-D / curve-trust prescription · Tindeq Progressor BLE
 import React, {
-  useCallback, useState, useEffect,
+  lazy, Suspense, useCallback, useState, useEffect,
 } from "react";
 // UI primitives (theme, formatters, shared components). See src/ui/.
 import { C, base } from "./ui/theme.js";
@@ -14,21 +13,16 @@ import { Btn, PageFrame } from "./ui/components.jsx";
 import { fmtW } from "./ui/format.js";
 
 // Top-level views extracted from this file. See src/views/.
-import { HistoryView } from "./views/HistoryView.jsx";
-import { SettingsView } from "./views/SettingsView.jsx";
 // AnalysisView is now imported by AnalysisContainer (see below) rather
 // than by App.js directly — the container hosts the Fingers / Lifts
 // pill toggle and renders one of two analysis views beneath it.
 import { SetupView } from "./views/SetupView.jsx";
-import { ClimbView } from "./views/ClimbView.jsx";
 import {
   ActiveSessionView, AutoRepSessionView, LastRepRedo,
   RestView, SwitchHandsView, BetweenSetRestView,
   SessionSummaryView, ManualOffsetPrompt,
 } from "./views/ActiveSessionViews.jsx";
-import { WorkoutTab } from "./views/WorkoutTab.jsx";
 import { ALL_WORKOUTS_LOOKUP } from "./data/legacyWorkouts.js";
-import { AnalysisContainer } from "./views/AnalysisContainer.jsx";
 
 // Shared lib helpers (storage, trip dates, CSV). See src/lib/.
 import {
@@ -54,7 +48,8 @@ import { useDailyState } from "./hooks/useDailyState.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import { useScreenWakeLock } from "./hooks/useScreenWakeLock.js";
 import { useLeaveWarning } from "./hooks/useLeaveWarning.js";
-import { SessionBoundary } from "./ui/ErrorBoundary.jsx";
+import { SessionBoundary, ViewBoundary } from "./ui/ErrorBoundary.jsx";
+
 import { useUserSettings } from "./hooks/useUserSettings.js";
 import { createVolumeExperiment, volumeExperimentStatus } from './model/volumeExperiment.js';
 import { today, uuid } from './util.js';
@@ -205,6 +200,17 @@ const TABS = ["Fingers", "Workout", "Climb", "Analysis", "History"];
 const SETTINGS_TAB = 5;
 const RESEARCH_TAB = 6;
 
+// Every tab except Fingers loads its code on first open, so the app starts
+// with the training screen's code only. The service worker precaches all
+// chunks, so the tabs still open offline.
+const lazyView = (load, name) => lazy(() => load().then(module => ({ default: module[name] })));
+const ResearchView = lazyView(() => import("./views/ResearchView.jsx"), "ResearchView");
+const HistoryView = lazyView(() => import("./views/HistoryView.jsx"), "HistoryView");
+const SettingsView = lazyView(() => import("./views/SettingsView.jsx"), "SettingsView");
+const ClimbView = lazyView(() => import("./views/ClimbView.jsx"), "ClimbView");
+const WorkoutTab = lazyView(() => import("./views/WorkoutTab.jsx"), "WorkoutTab");
+const AnalysisContainer = lazyView(() => import("./views/AnalysisContainer.jsx"), "AnalysisContainer");
+
 export default function App() {
   const { isOnline, syncSignal, retrySync } = useConnectivity();
   const pendingSyncCount = usePendingSyncCount();
@@ -331,6 +337,7 @@ export default function App() {
     startSession, chooseOffset, handleRepDone,
     handleRestDone, handleNextSet, handleAbort, handleSwitchHandsReady,
     setRestStartedAtMs, setRestSeconds, setRestHand, setRestSource, handleSetRestDone,
+    resumeWantsTindeq,
   } = useSessionRunner({
     history, freshMap, threeExpPriors, addReps, updateRep,
     tindeqConnected: tindeq.connected,
@@ -539,6 +546,14 @@ export default function App() {
       {/* Train tab */}
       <div hidden={tab !== 0}>
       <SessionBoundary>
+      {/* A reload drops the Bluetooth link. A session resumed after one was
+          using the Tindeq, so offer the reconnect here; the setup screen's
+          connect button is not reachable mid-session. */}
+      {resumeWantsTindeq && !tindeq.connected && <PageFrame style={{ padding: "16px 16px 0" }}>
+        <Btn onClick={tindeq.connect} disabled={tindeq.reconnecting} style={{ width: "100%" }}>
+          {tindeq.reconnecting ? "Reconnecting…" : "Connect Tindeq"}
+        </Btn>
+      </PageFrame>}
       {canRedoLastRep && <PageFrame><LastRepRedo onRedo={handleRedoLastRep} tindeq={tindeq} /></PageFrame>}
       {(tab === 0 || phase !== 'idle') && (() => {
         if (phase === "idle") {
@@ -694,6 +709,7 @@ export default function App() {
       </SessionBoundary>
       </div>
 
+      <ViewBoundary resetKey={tab}><Suspense fallback={null}>
       {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip}
         onTrainingStateChange={setSupportTrainingActive} />}
       <div hidden={tab !== 2}>
@@ -819,6 +835,7 @@ export default function App() {
           lastPulledAt={lastPulledAt}
         />
       )}
+      </Suspense></ViewBoundary>
     </div>
   );
 }

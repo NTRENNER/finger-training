@@ -44,14 +44,14 @@ test('sensor reps show target time beside target weight, and keep both through a
     tindeq={{ ...tindeq, signalRecovering: true }} unit="kg" />);
   expect(screen.getByText('Target weight')).toBeInTheDocument();
   expect(screen.getByText('Average weight')).toBeInTheDocument();
-  expect(screen.getAllByText('—')).toHaveLength(3);
+  expect(screen.getAllByText('—')).toHaveLength(2);
   view.rerender(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()}
     tindeq={{ ...tindeq, connected: false, reconnecting: true, signalRecovering: true }} unit="kg" />);
   // A mid-rep disconnect is flagged as recovering, so the layout holds with dashes.
   expect(screen.getByText('Target time')).toBeInTheDocument();
   expect(screen.getByText('Target weight')).toBeInTheDocument();
   expect(screen.getByText('Average weight')).toBeInTheDocument();
-  expect(screen.getAllByText('—')).toHaveLength(3);
+  expect(screen.getAllByText('—')).toHaveLength(2);
 });
 
 test('manual reps show the target time in the target row instead of a small line under the clock', () => {
@@ -62,4 +62,37 @@ test('manual reps show the target time in the target row instead of a small line
   expect(screen.getByText('Target time')).toBeInTheDocument();
   expect(screen.getByText('40s')).toBeInTheDocument();
   expect(screen.queryByText(/^target:/)).not.toBeInTheDocument();
+});
+
+// Product rule: during a rep the screen shows live weight, average weight,
+// time, target weight and target time. Nothing else, and nothing moves.
+// eslint-disable-next-line testing-library/no-node-access
+const hiddenBlocks = container => [...container.querySelectorAll('[aria-hidden="true"]')]
+  .filter(el => el.style.visibility === 'hidden');
+
+test('a running sensor rep hides Max and the rep dots, which keep their space', () => {
+  let start;
+  const tindeq = { targetKgRef: {}, startAutoDetect: a => { start = a; }, stopAutoDetect: jest.fn(),
+    connected: true, force: 18, avgForce: 17.5, peak: 20 };
+  const { container } = render(<AutoRepSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()} tindeq={tindeq} unit="kg" />);
+  expect(screen.getByText(/Max:/)).toBeInTheDocument();
+  expect(hiddenBlocks(container)).toHaveLength(0);
+
+  act(() => start());
+  expect(screen.queryByText(/Max:/)).not.toBeInTheDocument();
+  expect(hiddenBlocks(container)).toHaveLength(1);   // hidden, still in the layout
+  // The interrupt control sits after the timer, so it cannot push the timer down.
+  const timer = screen.getByText('Target time');
+  const interrupt = screen.getByRole('button', { name: 'Rep interrupted' });
+  expect(timer.compareDocumentPosition(interrupt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test('a running manual rep hides the rep dots and Max', () => {
+  const tindeq = { connected: false, targetKgRef: {}, setAutoFailCallback: jest.fn() };
+  const { container } = render(<ActiveSessionView session={session} onRepDone={jest.fn()} onAbort={jest.fn()} tindeq={tindeq} unit="kg" />);
+  expect(hiddenBlocks(container)).toHaveLength(0);
+  fireEvent.click(screen.getByRole('button', { name: /Start Rep/ }));
+  for (let i = 0; i < 4; i++) act(() => jest.advanceTimersByTime(1000));
+  expect(screen.queryByText(/Max:/)).not.toBeInTheDocument();
+  expect(hiddenBlocks(container)).toHaveLength(1);
 });

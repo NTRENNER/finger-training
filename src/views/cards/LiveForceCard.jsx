@@ -72,10 +72,13 @@ function BigTimer({ seconds, targetSeconds, running, referenceOnly = false, show
 //   targetTime / targetTimeLabel — optional preformatted target duration
 //                ("45s"); shown beside the target weight so both targets
 //                read together during a rep
+//   showSecondary — false hides the small Max / Avg readout. The training
+//                   active-rep screen shows only live weight, average
+//                   weight, time, target weight and target time.
 //   showUnavailable — preserve the live block with dash placeholders during
 //                     a transient signal interruption
 function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit = "lbs", numberSize = 108, emphasizePeak = false,
-  targetTime = null, targetTimeLabel = "Target time", showUnavailable = false }) {
+  targetTime = null, targetTimeLabel = "Target time", showUnavailable = false, showSecondary = true }) {
   const tgtPct  = targetKg != null ? clamp(targetKg / maxDisplay, 0, 1) : null;
   const liveActive = typeof force === "number" && isFinite(force);
   const showLiveBlock = liveActive || showUnavailable;
@@ -119,7 +122,7 @@ function ForceGauge({ force, avg, peak, targetKg = null, maxDisplay = 50, unit =
               {displayWeight(liveActive ? (emphasizePeak ? peak : avg) : null)} <span style={{ fontSize: 16, fontWeight: 600 }}>{unit}</span>
             </div>
           </div>
-          <span style={{ fontSize: 12 }}>{emphasizePeak ? 'Avg' : 'Max'}: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{displayWeight(liveActive ? (emphasizePeak ? avg : peak) : null)}</b></span>
+          {showSecondary && <span style={{ fontSize: 12 }}>{emphasizePeak ? 'Avg' : 'Max'}: <b style={{ color: C.orange, fontVariantNumeric: "tabular-nums" }}>{displayWeight(liveActive ? (emphasizePeak ? avg : peak) : null)}</b></span>}
         </div>
         <div style={{ position: "relative", height: 28, background: C.border, borderRadius: 6, overflow: "hidden" }}>
           <div style={{ position: "absolute", height: "100%", width: `${fPct * 100}%`, background: barColor, borderRadius: 6, transition: "width 0.05s" }} />

@@ -45,3 +45,23 @@ test("non-hand edit (time) keeps the same rep id (cheap in-place path)", async (
   expect(h[0].id).toBe("rep-L-9");   // same row, in place
   expect(h[0].actual_time_s).toBe(99);
 });
+
+// Regression: moving a rep to the other hand tombstones the slot it left.
+// Moving it back used "highest rep number + 1" on the original hand, which
+// is that same tombstoned slot, so the next sync dropped the rep.
+test("moving a rep to the other hand and back does not reuse its tombstoned slot", async () => {
+  const reps = [1, 2, 3, 4, 5].map(n => L(`rep-L-${n}`, n));
+  saveLS(LS_HISTORY_KEY, reps);
+  const { result } = renderHook(() => useRepHistory({ user: null }));
+
+  await act(async () => { await result.current.updateRep(reps[4], { hand: "R" }); });
+  const onRight = result.current.history.find(r => r.hand === "R");
+  expect(onRight.rep_num).toBe(1);
+
+  await act(async () => { await result.current.updateRep(onRight, { hand: "L" }); });
+  const left = result.current.history.filter(r => r.hand === "L");
+  expect(left).toHaveLength(5);
+  expect(result.current.history.some(r => r.hand === "R")).toBe(false);
+  const back = left.find(r => r.actual_time_s === 141 && !/^rep-L-[1-4]$/.test(r.id));
+  expect(back.rep_num).toBe(6);   // slot 5 on L is tombstoned
+});

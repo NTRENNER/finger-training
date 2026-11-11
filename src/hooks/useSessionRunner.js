@@ -70,6 +70,7 @@ import { sessionAdjustment } from "../model/cookedScaling.js";
 import { MAX_OPTIONAL_SETS, isSetComplete } from "../model/setRecommendation.js";
 import { snapshotVolumePlan, isVolumeSetComplete } from "../model/volumeSession.js";
 import { pushDailyState } from "../lib/sync.js";
+import { saveSessionSnapshot, readSessionSnapshot, clearSessionSnapshot } from "../lib/sessionResume.js";
 import { buildMixedLoadModel, prepareMixedPrediction, completeMixedPrediction } from '../model/mixedLoadPrediction.js';
 import { mixedReadinessModel, prepareAdaptiveMixedPrediction, mixedLoadProtocolFields } from '../model/mixedLoadPrescription.js';
 import { MAX_TEST_ATTEMPTS, MAX_TEST_REST_S, MAX_TEST_TARGET_S } from '../model/peakForce.js';
@@ -765,6 +766,84 @@ export function useSessionRunner({
     else setPhase("idle");
   }, [phase, currentSet, sessionReps, finishSession]);
 
+  // ── Resume after a reload (see lib/sessionResume.js) ─────────
+  // Restore once, on mount, before anything is written back.
+  const resumeCheckedRef = useRef(false);
+  // True after resuming a session that was using the Tindeq, until it is
+  // connected again or the athlete carries on without it.
+  const [resumeWantsTindeq, setResumeWantsTindeq] = useState(false);
+  useEffect(() => {
+    if (resumeWantsTindeq && (tindeqConnected || phase === 'idle' || phase === 'done')) setResumeWantsTindeq(false);
+  }, [resumeWantsTindeq, tindeqConnected, phase]);
+  useEffect(() => {
+    if (resumeCheckedRef.current) return;
+    resumeCheckedRef.current = true;
+    const snap = readSessionSnapshot(history, { todayYmd: today() });
+    if (!snap) return;
+    const ids = new Set(snap.repIds);
+    volumePlanRef.current = null;
+    mixedModelsRef.current = {};
+    predictionModelsRef.current = {};   // no leak-free rebuild is possible
+    sessionAdjustmentRef.current = snap.sessionAdjustment;
+    sessionPrescriptionRef.current = snap.sessionPrescription;
+    sessionDecisionRef.current = snap.sessionDecision;
+    lastActivityByHandRef.current = snap.lastActivityByHand || {};
+    preSessionHistoryRef.current = history.filter(r => !ids.has(r.id));
+    firstHandRef.current = snap.firstHand || snap.activeHand;
+    retryRecordRef.current = null;
+    repDoneLockRef.current = false;
+    setConfig(snap.config);
+    setSessionId(snap.sessionId);
+    setSessionStartedAt(snap.sessionStartedAt);
+    setSessionDate(snap.sessionDate);
+    setRefWeights(snap.refWeights || {});
+    setSessionReps(snap.reps);
+    setRetryTargetKg(null);
+    setCurrentSet(snap.currentSet);
+    setCurrentRep(snap.currentRep);
+    setActiveHand(snap.activeHand);
+    setManualOffset(snap.manualOffset === true);
+    setLastRepResult(null);
+    setLeveledUp(false);
+    setAwards([]);
+    if (snap.phase === 'between_sets' && snap.setRest) {
+      setSetRestStartedAtMs(snap.setRest.startedAtMs);
+      setSetRestSeconds(snap.setRest.seconds);
+      setSetOpeningRestS(snap.setRest.openingRestS);
+      setSetRestHand(snap.setRest.hand);
+      setSetRestSource(snap.setRest.source);
+    }
+    setResumeWantsTindeq(snap.tindeq === true && !tindeqConnected);
+    setPhase(snap.phase === 'between_sets' && !snap.setRest ? 'rep_ready' : snap.phase);
+    onSessionStart?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Save the session's place after every step; forget it once the session
+  // ends. The first render is skipped so an idle start cannot erase a
+  // snapshot before the restore above has read it.
+  const sawActivePhaseRef = useRef(false);
+  useEffect(() => {
+    if (!resumeCheckedRef.current) return;
+    if (phase === 'idle' || phase === 'done') {
+      if (sawActivePhaseRef.current) clearSessionSnapshot();
+      sawActivePhaseRef.current = false;
+      return;
+    }
+    sawActivePhaseRef.current = true;
+    const saved = saveSessionSnapshot({
+      phase, config, sessionId, sessionStartedAt, sessionDate, refWeights: baseRefWeights,
+      currentSet, currentRep, activeHand, firstHand: firstHandRef.current, manualOffset, sessionReps,
+      tindeqConnected, tindeqWanted: resumeWantsTindeq,
+      sessionAdjustment: sessionAdjustmentRef.current, sessionPrescription: sessionPrescriptionRef.current,
+      sessionDecision: sessionDecisionRef.current, lastActivityByHand: lastActivityByHandRef.current,
+      setRest: phase === 'between_sets' ? { startedAtMs: setRestStartedAtMs, seconds: setRestSeconds,
+        openingRestS: setOpeningRestS, hand: setRestHand, source: setRestSource } : null,
+    });
+    if (!saved) clearSessionSnapshot();
+  }, [phase, config, sessionId, sessionStartedAt, sessionDate, baseRefWeights, currentSet, currentRep,
+    activeHand, manualOffset, sessionReps, tindeqConnected, resumeWantsTindeq, setRestStartedAtMs, setRestSeconds, setOpeningRestS, setRestHand, setRestSource]);
+
   // Normal sets retain their load; beta refWeights already points to the next hold.
   const nextWeight = useMemo(() => {
     if (phase !== "resting") return null;
@@ -787,5 +866,6 @@ export function useSessionRunner({
     handleRestDone, handleNextSet, handleAbort,
     setRestStartedAtMs, setRestSeconds, setRestHand, setRestSource,
     handleSetRestDone, handleSwitchHandsReady,
+    resumeWantsTindeq,
   };
 }

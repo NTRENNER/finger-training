@@ -166,3 +166,44 @@ export class SessionBoundary extends React.Component {
     );
   }
 }
+
+// Boundary for the tabs that load their code on first open. A failed load
+// (offline before the code was cached) or a render error stays inside the
+// tab instead of reaching the app-root boundary, whose recovery would
+// re-mount the app and end a running session.
+export class ViewBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error("ViewBoundary caught:", error, info?.componentStack);
+  }
+  // Switching tabs clears the error without re-mounting the tabs: the Climb
+  // tab stays mounted while hidden so a warm-up in progress is kept.
+  componentDidUpdate(prev) {
+    if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null });
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div role="alert" style={{
+        background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+        padding: "24px", margin: "20px 16px", textAlign: "center",
+      }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>This tab could not open</div>
+        <button
+          onClick={() => this.setState({ error: null })}
+          style={{
+            background: C.blue, color: C.bg, border: "none", borderRadius: 8,
+            padding: "12px 20px", minHeight: 44, fontSize: 15, fontWeight: 600, cursor: "pointer",
+          }}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+}
