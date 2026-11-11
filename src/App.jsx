@@ -53,6 +53,8 @@ import { useRepHistory } from "./hooks/useRepHistory.js";
 import { useDailyState } from "./hooks/useDailyState.js";
 import { useSessionRunner } from "./hooks/useSessionRunner.js";
 import { useScreenWakeLock } from "./hooks/useScreenWakeLock.js";
+import { useLeaveWarning } from "./hooks/useLeaveWarning.js";
+import { SessionBoundary } from "./ui/ErrorBoundary.jsx";
 import { useUserSettings } from "./hooks/useUserSettings.js";
 import { createVolumeExperiment, volumeExperimentStatus } from './model/volumeExperiment.js';
 import { today, uuid } from './util.js';
@@ -337,6 +339,7 @@ export default function App() {
     onSessionStart: () => setTab(0),
   });
   useScreenWakeLock(phase !== "idle" || climbTrainingActive || supportTrainingActive);
+  useLeaveWarning(phase !== "idle" && phase !== "done");
 
   const volumeReady = user ? historySynced && settingsSynced : getStorageUserId() == null;
   const volumeExperiment = Object.values(volumeExperiments || {})
@@ -623,12 +626,13 @@ export default function App() {
       )}
 
       {config.peakTest && phase !== "idle" && <div hidden={tab !== 0}>
-        <PageFrame style={{ padding: '20px 16px' }}><PeakTestView key={sessionId} grip={config.grip} hand={config.hand}
+        <SessionBoundary><PageFrame style={{ padding: '20px 16px' }}><PeakTestView key={sessionId} grip={config.grip} hand={config.hand}
           history={history} tindeq={tindeq} addReps={addReps} updateRep={updateRep} unit={unit} visible={tab === 0}
-          onClose={() => setPhase("idle")} /></PageFrame>
+          onClose={() => setPhase("idle")} /></PageFrame></SessionBoundary>
       </div>}
       {/* Train tab */}
       <div hidden={tab !== 0}>
+      <SessionBoundary>
       {canRedoLastRep && <PageFrame><LastRepRedo onRedo={handleRedoLastRep} tindeq={tindeq} /></PageFrame>}
       {(tab === 0 || phase !== 'idle') && (() => {
         if (phase === "idle") {
@@ -781,6 +785,7 @@ export default function App() {
 
         return null;
       })()}
+      </SessionBoundary>
       </div>
 
       {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip}

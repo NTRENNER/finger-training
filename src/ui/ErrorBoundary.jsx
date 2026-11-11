@@ -123,3 +123,43 @@ export class CardBoundary extends React.Component {
     );
   }
 }
+
+// Session-screen boundary. The running session (which set and rep, the
+// session id, the frozen plan) lives in App's hooks, above this boundary. A
+// throw in one session screen used to reach the app-root boundary, whose
+// recovery re-mounts App and so ended the session. Catching it here keeps
+// the session: "Try again" redraws the same screen at the same point.
+export class SessionBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error("SessionBoundary caught:", error, info?.componentStack);
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div role="alert" style={{
+        background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
+        padding: "24px", margin: "20px 16px", textAlign: "center",
+      }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>This screen hit an error</div>
+        <div style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>
+          Your session is still running and your finished reps are saved.
+        </div>
+        <button
+          onClick={() => this.setState({ error: null })}
+          style={{
+            background: C.blue, color: "#fff", border: "none", borderRadius: 8,
+            padding: "12px 20px", minHeight: 44, fontSize: 15, fontWeight: 600, cursor: "pointer",
+          }}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+}
