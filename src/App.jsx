@@ -55,6 +55,7 @@ import { createVolumeExperiment, volumeExperimentStatus } from './model/volumeEx
 import { today, uuid } from './util.js';
 import { useActivities } from "./hooks/useActivities.js";
 import { useConnectivity } from "./hooks/useConnectivity.js";
+import { useCommunity } from "./hooks/useCommunity.js";
 import { usePendingSyncCount } from "./hooks/usePendingSyncCount.js";
 import {
   deleteWorkoutSession,
@@ -210,6 +211,7 @@ const SettingsView = lazyView(() => import("./views/SettingsView.jsx"), "Setting
 const ClimbView = lazyView(() => import("./views/ClimbView.jsx"), "ClimbView");
 const WorkoutTab = lazyView(() => import("./views/WorkoutTab.jsx"), "WorkoutTab");
 const AnalysisContainer = lazyView(() => import("./views/AnalysisContainer.jsx"), "AnalysisContainer");
+const CommunityView = lazyView(() => import("./views/CommunityView.jsx"), "CommunityView");
 
 export default function App() {
   const { isOnline, syncSignal, retrySync } = useConnectivity();
@@ -222,6 +224,7 @@ export default function App() {
     otpSent, otpCode, setOtpCode, otpBusy, otpError,
     sendOtp, verifyOtp, cancelOtp, signOut,
   } = useAuth();
+  const [communityNoticeDismissed, setCommunityNoticeDismissed] = useState(() => !!loadLS('ft_community_notice_seen'));
 
   // ── User settings (see src/hooks/useUserSettings.js) ─────
   // Owns unit, bodyWeight + bwLog reconcile, trip, climbingFocus,
@@ -304,6 +307,9 @@ export default function App() {
   // ── Tab ───────────────────────────────────────────────────
   const researchMode = /^\/research\/?$/.test(window.location.pathname);
   const [tab, setTab] = useState(() => researchMode ? RESEARCH_TAB : 0);
+  const [communityOnDashboard, setCommunityOnDashboard] = useState(false);
+  // Other members' updates are fetched only while the dashboard shows them.
+  const community = useCommunity({ user, isOnline, syncSignal, live: communityOnDashboard });
   const [climbVisited, setClimbVisited] = useState(false);
   const [climbTrainingActive, setClimbTrainingActive] = useState(false);
   const [supportTrainingActive, setSupportTrainingActive] = useState(false);
@@ -345,6 +351,10 @@ export default function App() {
   });
   useScreenWakeLock(phase !== "idle" || climbTrainingActive || supportTrainingActive);
   useLeaveWarning(phase !== "idle" && phase !== "done");
+  const communityPaused = (phase !== 'idle' && phase !== 'done') || climbTrainingActive || supportTrainingActive;
+  // Community sits under the Fingers dashboard, the first screen of the app.
+  const showCommunity = tab === 0 && phase === 'idle' && !climbTrainingActive && !supportTrainingActive;
+  useEffect(() => { setCommunityOnDashboard(showCommunity); }, [showCommunity]);
 
   const volumeReady = user ? historySynced && settingsSynced : getStorageUserId() == null;
   const volumeExperiment = Object.values(volumeExperiments || {})
@@ -710,7 +720,21 @@ export default function App() {
       </SessionBoundary>
       </div>
 
+      {showCommunity && community.owner && community.sharing && !communityNoticeDismissed && (
+        <PageFrame><div style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, fontSize: 13 }}>
+          <strong>Community sharing is on</strong>
+          <p>New achievement cards, live progress rankings, and your best measured peaks are shared automatically with signed-in members under a display name. Rankings can include existing measurements. You can turn sharing off anytime.</p>
+          <div style={{ display: 'flex', gap: 12 }}><Btn small onClick={() => setTab(SETTINGS_TAB)}>Manage sharing</Btn>
+            <Btn small color={C.border} onClick={() => { if (saveLS('ft_community_notice_seen', true)) setCommunityNoticeDismissed(true); }}>Dismiss</Btn></div>
+        </div></PageFrame>
+      )}
       <ViewBoundary resetKey={tab}><Suspense fallback={null}>
+      {community.owner && (showCommunity || (community.sharing && baselinePinReady && !communityPaused)) && (
+        <CommunityView visible={showCommunity} ready={baselinePinReady}
+          paused={communityPaused}
+          community={community} history={history} pinnedGripBaselines={pinnedGripBaselines}
+          pinnedPerHandBaselines={pinnedPerHandBaselines} unit={unit} />
+      )}
       {tab === 1 && <WorkoutTab unit={unit} onSessionSaved={handleWorkoutSessionSaved} onBwSave={saveBW} trip={trip}
         onTrainingStateChange={setSupportTrainingActive} />}
       <div hidden={tab !== 2}>
@@ -811,6 +835,7 @@ export default function App() {
       )}
       {tab === SETTINGS_TAB && (
         <SettingsView
+          community={community}
           user={user}
           loginEmail={loginEmail}
           setLoginEmail={setLoginEmail}

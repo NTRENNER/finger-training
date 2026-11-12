@@ -29,6 +29,7 @@ import { HandPhotoUpload } from "../hands/HandPhotoUpload.jsx";
 import { userPrefix } from "../hands/handUpload.js";
 import { KG_TO_LBS, fmt1, toDisp } from "../ui/format.js";
 import { BodyWeightEntry } from "./BodyWeightEntry.jsx";
+import { CommunityPreferences } from './CommunityPreferences.jsx';
 import { tripCountdown } from "../lib/trip.js";
 import { longBuildLabel } from "../lib/buildInfo.js";
 import {
@@ -36,6 +37,7 @@ import {
 } from "../model/cookedScaling.js";
 
 export function SettingsView({
+  community = null,
   user, loginEmail, setLoginEmail,
   onSendOtp = () => {}, onVerifyOtp = () => {}, onCancelOtp = () => {},
   otpSent = false, otpCode = "", setOtpCode = () => {},
@@ -81,6 +83,7 @@ CREATE POLICY "auth_all" ON reps
   return (
     <PageFrame style={{ padding: "20px 16px" }}>
       <h2 style={{ margin: "0 0 20px", fontSize: 26 }}>Settings</h2>
+      {community && <CommunityPreferences community={community} />}
 
       <Card>
         <Sect title="Units">
