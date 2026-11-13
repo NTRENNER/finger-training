@@ -150,5 +150,59 @@ await denied('select public.sync_community($1::jsonb,$2::jsonb)', ['[]', '[]']);
 await db.exec('set role anon');
 await denied('select * from public.community_profiles');
 await denied('select * from public.community_feed()');
+// Upgrade a populated database: old clients/rows must remain usable without
+// inventing missing baselines, then exercise the new improvement-only RPC.
+await db.exec('reset role');
+await db.exec(await readFile(new URL('../supabase/migrations/20261112122110_community_peak_improvement.sql', import.meta.url), 'utf8'));
+// Both members joined before every comparison date below.
+await db.exec("update public.community_profiles set created_at = '2025-12-15T12:00:00Z'");
+await db.exec('set role authenticated');
+await member(a);
+const peakBoard = (hand = null, grip = 'Crusher') => query('select * from public.community_peak_improvement_ranking($1,$2)', [grip,hand]);
+check((await peakBoard()).length, 0, 'existing absolute peaks never acquire invented gains');
+const improvedPeak = { grip: 'Crusher', hand: 'L', peak_kg: 60, measured_date: '2026-03-01',
+  baseline_peak_kg: 40, baseline_date: '2026-01-01', improvement_peak_kg: 50, improvement_date: '2026-02-01' };
+await sync([], [improvedPeak, { ...improvedPeak, hand: 'R', peak_kg: 110, baseline_peak_kg: 100, improvement_peak_kg: 110 }]);
+await sync([], [improvedPeak, { ...improvedPeak, hand: 'R', peak_kg: 110, baseline_peak_kg: 100, improvement_peak_kg: 110 }]);
+check((await peakBoard()).length, 1, 'repeat publication keeps one improvement per member');
+check((await peakBoard())[0].hand, 'L', 'most improved hand wins even when weaker');
+check((await peakBoard())[0].peak_kg, 50, 'comparison does not borrow a larger non-max-intent peak');
+check((await peakBoard('R'))[0].peak_kg, 110, 'hand filter uses that hand baseline');
+check((await peakBoard(null, 'Prime')).length, 0, 'improvement grip filter');
+await member(b);
+await sync([], [{ ...improvedPeak, baseline_peak_kg: 100, peak_kg: 110, improvement_peak_kg: 110 }]);
+check((await peakBoard()).map(r => r.user_id), [a,b], 'larger percentage gain outranks highest absolute force');
+check((await peakBoard()).map(r => Number(r.place)), [1,2], 'gain defines ordinal rank');
+await sync([], [{ ...improvedPeak, baseline_peak_kg: 80, peak_kg: 100, improvement_peak_kg: 100 }]);
+check((await peakBoard()).map(r => Number(r.place)), [1,1], 'equal percentages at different forces tie');
+await sync([], [{ ...improvedPeak, baseline_peak_kg: 80, peak_kg: 100.0000001, improvement_peak_kg: 100.0000001 }]);
+check((await peakBoard()).map(r => r.user_id), [b,a], 'unrounded percentage determines order');
+const beforeJoin = { ...improvedPeak, baseline_peak_kg: 10, peak_kg: 60, improvement_peak_kg: 50 };
+await sync([], [{ ...beforeJoin, baseline_date: '2025-12-13' }]);
+check((await peakBoard()).map(r => r.user_id), [a], 'a baseline before joining is never ranked');
+await sync([], [{ ...beforeJoin, baseline_date: '2025-12-14' }]);
+check((await peakBoard()).map(r => r.user_id), [b,a], 'one day of time-zone slack before the join date');
+await sync([], peaks);
+check((await peakBoard()).map(r => r.user_id), [a], 'old-client publication cannot appear as fabricated improvement');
+await denied('insert into public.community_peaks(user_id,grip,hand,peak_kg,measured_date,baseline_peak_kg,baseline_date,improvement_peak_kg,improvement_date) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+  [a,'Prime','R',50,'2026-03-01',40,'2026-01-01',50,'2026-02-01']);
+await member(a);
+for (const patch of [{ baseline_peak_kg: 0 }, { baseline_date: null }, { improvement_date: improvedPeak.baseline_date },
+  { improvement_peak_kg: 61 }, { improvement_peak_kg: 39 }, { improvement_date: '2099-01-01' }]) {
+  await denied('select public.sync_community($1::jsonb,$2::jsonb)', ['[]', JSON.stringify([{ ...improvedPeak, ...patch }])]);
+}
+check((await peakBoard())[0].improvement_pct, 25, 'invalid comparison rolls back replacement');
+await query('update public.community_profiles set sharing_enabled = false where user_id = $1', [a]);
+await member(b);
+check((await peakBoard()).length, 0, 'opt-out hides new peak improvement RPC');
+await member(a);
+await query('update public.community_profiles set sharing_enabled = true where user_id = $1', [a]);
+await sync([], []);
+check((await peakBoard()).length, 0, 'removed or disputed sources retract peak gains');
+await sync([], [improvedPeak]);
+await member(b, true);
+check((await peakBoard()).length, 0, 'anonymous authenticated user cannot see peak improvements');
+await db.exec('set role anon');
+await denied("select * from public.community_peak_improvement_ranking('Crusher')");
 console.log(`Community PostgreSQL: ${checks} checks passed. In-memory database only.`);
 await db.close();

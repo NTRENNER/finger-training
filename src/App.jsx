@@ -721,7 +721,7 @@ export default function App() {
       {showCommunity && community.owner && community.sharing && !communityNoticeDismissed && (
         <PageFrame><div style={{ border: `1px solid ${C.border}`, borderRadius: 12, padding: 16, fontSize: 13 }}>
           <strong>Community sharing is on</strong>
-          <p>New achievement cards, live progress rankings, and your best measured peaks are shared automatically with signed-in members under a display name. Rankings can include existing measurements. You can turn sharing off anytime.</p>
+          <p>New achievement cards, live progress rankings, your best measured peaks and your peak gains since joining are shared automatically with signed-in members under a display name. Rankings can include existing measurements. You can turn sharing off anytime.</p>
           <div style={{ display: 'flex', gap: 12 }}><Btn small onClick={() => setTab(SETTINGS_TAB)}>Manage sharing</Btn>
             <Btn small color={C.border} onClick={() => { if (saveLS('ft_community_notice_seen', true)) setCommunityNoticeDismissed(true); }}>Dismiss</Btn></div>
         </div></PageFrame>

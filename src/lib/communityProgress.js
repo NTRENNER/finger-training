@@ -1,7 +1,7 @@
 import { comparisonReps, forceComparison } from '../model/curveComparison.js';
 import { SUPPORT_MIN_HOLD_FRAC } from '../model/baselines.js';
 import { ZONE6, ZONE_REF_T } from '../model/zones.js';
-import { buildPeakForceTrend } from '../model/peakForce.js';
+import { buildPeakForceTrend, PEAK_MAX_PROTOCOL_T } from '../model/peakForce.js';
 import { loadProvenance } from '../model/forceRecording.js';
 import { ymdLocal } from '../util.js';
 
@@ -68,18 +68,43 @@ export function communityProgress(history, overlays, today) {
 // One observed record per grip/hand, using the existing peak evidence gates.
 // No extrapolated curve value, manual load, bodyweight division or rounding
 // enters ranking. The display may round only after rank has been computed.
-export function communityPeaks(history, today) {
+// The improvement baseline is the first max-intent day on or after the
+// member joined the community; without a join date no comparison is made.
+export function communityPeaks(history, today, joinedAt = null) {
+  const joined = Date.parse(joinedAt);
+  const joinDate = Number.isFinite(joined) ? ymdLocal(new Date(joined)) : null;
   const result = [];
   const grips = [...new Set(history.map(r => r.grip).filter(Boolean))];
   for (const grip of grips) for (const hand of ['L', 'R']) {
     const rows = history.filter(r => r.grip === grip && r.hand === hand && r.date <= today
       && ['measured_force', 'legacy_measured'].includes(loadProvenance(r)));
     let best = null;
+    const maxIntentDays = new Map();
     buildPeakForceTrend(rows, { valueForRep: (peak, rep) => {
       if (!best || peak > best.kg || (peak === best.kg && rep.date < best.date)) best = { kg: peak, date: rep.date };
+      // Match the existing peak trend's max-intent definition, including
+      // legacy measurements without a target. Keep full measured precision.
+      const rawTarget = Number(rep.target_duration);
+      const target = Number.isFinite(rawTarget) && rawTarget > 0 ? rawTarget : null;
+      if (target == null || target <= PEAK_MAX_PROTOCOL_T) {
+        maxIntentDays.set(rep.date, Math.max(maxIntentDays.get(rep.date) || 0, peak));
+      }
       return peak;
     } });
-    if (best) result.push({ grip, hand, peak_kg: best.kg, measured_date: best.date });
+    if (best) {
+      const snapshot = { grip, hand, peak_kg: best.kg, measured_date: best.date };
+      const days = joinDate ? [...maxIntentDays.keys()].filter(d => d >= joinDate).sort() : [];
+      const baselineDate = days[0];
+      const baseline = maxIntentDays.get(baselineDate);
+      let improved = null;
+      for (const date of days.slice(1)) {
+        const peak = maxIntentDays.get(date);
+        if (peak > baseline && (!improved || peak > improved.kg)) improved = { kg: peak, date };
+      }
+      if (improved) Object.assign(snapshot, { baseline_peak_kg: baseline, baseline_date: baselineDate,
+        improvement_peak_kg: improved.kg, improvement_date: improved.date });
+      result.push(snapshot);
+    }
   }
   return result;
 }

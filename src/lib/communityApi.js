@@ -29,7 +29,7 @@ export const syncCommunity = (owner, achievements, peaks, progress = []) => comm
 export const readCommunityFeed = (owner, grip = null, cursor = null) => communityRequest(owner, () =>
   supabase.rpc('community_feed', { p_grip: grip, p_before: cursor?.created_at ?? null, p_before_id: cursor?.id ?? null }));
 export const readCommunityRanking = (owner, grip, hand = null) => communityRequest(owner, () =>
-  supabase.rpc('community_ranking', { p_grip: grip, p_hand: hand }));
+  supabase.rpc('community_peak_improvement_ranking', { p_grip: grip, p_hand: hand }));
 export const readCommunityGroups = (owner, grip) => communityRequest(owner, () =>
   supabase.rpc('community_improvement_groups', { p_grip: grip }));
 export const readCommunityImprovements = (owner, grip, group) => communityRequest(owner, () =>

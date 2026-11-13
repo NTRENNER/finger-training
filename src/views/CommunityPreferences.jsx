@@ -15,7 +15,7 @@ export function CommunityPreferences({ community }) {
       <span>Share achievements and peak force</span>
     </label>
     <p style={{ color: C.muted, fontSize: 13, lineHeight: 1.6 }}>
-      The app automatically shares new achievement cards, live progress rankings, and your best measured peaks with signed-in members under your display name.
+      The app automatically shares new achievement cards, live progress rankings, your best measured peaks and your peak gains since joining with signed-in members under your display name.
       Rankings can include existing measurements. Turning this off hides your existing cards and ranking entries, too.
     </p>
     <form onSubmit={e => { e.preventDefault(); update({ display_name: displayName.trim() }); setName(null); }}>

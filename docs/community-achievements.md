@@ -83,16 +83,38 @@ check after migration approval; local tests validate handlers and DB triggers.
 
 ## Peak force ranking
 
-Separate lists for Crusher, Micro and Prime, using absolute measured force.
-Best hand gives one entry per member; Left/Right filters compare the same hand.
-This is an all-time observed record with its measurement date, not a claim
-about current fitness. No body-weight normalization or cross-grip aggregation.
-Exact ties share rank; display-unit rounding never changes rank. Top 100 are
-shown. The ranking reads existing valid peak evidence (including Peak Test),
-excluding non-measured loads, invalid/disputed attempts and seed artifacts.
+Separate lists for Crusher, Micro and Prime, ranked by **percentage improvement**.
+The starting value is the best measured peak on the first eligible max-intent
+training date for that grip and hand **on or after the member's community join
+date**; compare it with the best later max-intent peak. Earlier history never
+sets the baseline, so long-time users are not ranked on their first weeks of
+learning a device or on equipment changed before they joined. The ranking RPC
+also rejects a baseline dated before the join date (one day of time-zone slack,
+as for achievements), whichever path wrote the row. This uses the existing peak trend's definition: target duration at most
+12 seconds, including legacy measurements without a usable target. Long-hold
+workouts cannot establish an artificially low improvement baseline. A positive
+gain needs two distinct eligible dates. No new model fit or baseline pin is made.
 
-Unlike achievement cards, existing eligible peak records can enter the ranking
-at enrollment. The default-sharing notice explicitly covers best measured peaks.
+Most improved hand gives one entry per member, chosen by percentage gain;
+Left/Right filters retain separate same-hand comparisons. Rows show both forces,
+both dates and percentage gain. For example, 40 → 50 kg (+25%) outranks
+100 → 110 kg (+10%). This is improvement in a recorded best, not current fitness.
+No body-weight normalization or cross-grip aggregation. Exact percentage ties
+share rank; display rounding never changes rank. Top 100 are shown. Existing
+peak evidence gates (including Peak Test) exclude non-measured loads,
+invalid/disputed attempts and seed artifacts.
+
+The additive `20261112122110_community_peak_improvement.sql` migration stores
+paired comparison summaries and calculates percentages in a new invoker RPC.
+Existing absolute snapshots and the original RPC remain compatible with old
+clients. Missing baselines never become invented gains: members appear after
+their updated app next publishes eligible summaries. A still-open old client
+can replace its owner's summaries without comparison fields; that member then
+temporarily leaves the new ranking until an updated client republishes.
+
+Unlike achievement cards, the separate absolute peak snapshot may still carry
+an existing record. The default-sharing notice names best measured peaks and
+peak gains since joining.
 Edited/deleted source evidence is reconciled when that member's app next syncs.
 
 ## Stars and evidence
@@ -211,4 +233,24 @@ Decisions made at activation:
 - The sharing switch and display name are in Settings only.
 - Other members' updates are fetched only while the dashboard shows the
   section. A member's own results are published after each workout.
+
+## Peak improvement correction — 2026-11-12
+
+Read-only verification found remote main and production at
+`fc770c7fd2450f039e9e47bade6366ab4f7e07ad`. The deployed UI said “All-time
+observed peak”; hosted `community_ranking` ordered by absolute `peak_kg`.
+Hosted `community_improvement_ranking` already ordered by `improvement_pct`.
+Nathan requested that the peak board reward who improved most. On review he
+chose the community join date as the baseline (first max-effort day since
+joining), so earlier history and earlier equipment cannot inflate a gain. The
+correction described above is local and awaits approval for its additive hosted
+migration; it has not been committed, pushed or applied to production.
+
+Validation: 2,269 Jest tests passed (3 skipped), lint, production build/offline
+checks, and 78 isolated PostgreSQL checks including the join-date baseline, upgrade of populated tables,
+old-client compatibility, gain ordering, exact ties, full precision, ownership,
+opt-out, invalid comparison rollback and evidence retraction. Browser checks
+with fictional data verified percentage-first display, hand filtering, and no
+page or cell overflow at 320px/375px. No hosted data writes or physical BLE tests
+were performed. `src/model` and `src/lib/tindeq.js` remain unchanged.
 

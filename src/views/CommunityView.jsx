@@ -27,7 +27,8 @@ function CommunityExperience({ visible, community, history, pinnedGripBaselines,
   const { historyOverlay, displayHistory } = useContinuousProgress({ history, grips, pinnedGripBaselines, pinnedPerHandBaselines });
   const today = ymdLocal();
   const progress = useMemo(() => communityProgress(displayHistory, historyOverlay, today), [displayHistory, historyOverlay, today]);
-  const peaks = useMemo(() => communityPeaks(displayHistory, today), [displayHistory, today]);
+  const peaks = useMemo(() => communityPeaks(displayHistory, today, community.profile?.created_at),
+    [displayHistory, today, community.profile?.created_at]);
   const rankings = useMemo(() => communityImprovementSnapshots(displayHistory, historyOverlay, today), [displayHistory, historyOverlay, today]);
   const candidates = useMemo(() => community.profile?.created_at
     ? publicationCandidates(progress.stars, community.profile.created_at) : [], [progress.stars, community.profile?.created_at]);
@@ -111,20 +112,22 @@ export function CommunityScreen({ community, progress, unit = 'lbs', revision = 
       {more && <Btn disabled={loading} onClick={() => setCursor(feed.at(-1))}>Load more achievements</Btn>}
     </>}
     {section === 'peaks' && <Card>
-      <h2 style={{ fontSize: 20 }}>{grip} peak force</h2>
-      <p style={{ color: C.muted, fontSize: 13 }}>All-time observed peak · Top 100 members · Absolute {unit}</p>
+      <h2 style={{ fontSize: 20 }}>{grip} peak force improvement</h2>
+      <p style={{ color: C.muted, fontSize: 13 }}>Largest percentage gains · First max-effort session since joining → best later peak · Top 100</p>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-        {[['', 'Best hand'], ['L', 'Left'], ['R', 'Right']].map(([key, title]) => <button key={key} style={chip(hand === key)} aria-pressed={hand === key} onClick={() => setHand(key)}>{title}</button>)}
+        {[['', 'Most improved hand'], ['L', 'Left'], ['R', 'Right']].map(([key, title]) => <button key={key} style={chip(hand === key)} aria-pressed={hand === key} onClick={() => setHand(key)}>{title}</button>)}
       </div>
-      {ranking.length > 0 && <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-        <thead><tr>{['Rank', 'Member', 'Peak'].map(title => <th key={title} style={{ textAlign: 'left', paddingBottom: 12, color: C.muted }}>{title}</th>)}</tr></thead>
+      {ranking.length > 0 && <table aria-label="Peak force improvement rankings" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead><tr>{['Rank', 'Member', 'Gain'].map(title => <th key={title} style={{ textAlign: 'left', paddingBottom: 12, color: C.muted }}>{title}</th>)}</tr></thead>
         <tbody>{ranking.map(row => <tr key={row.user_id} style={{ borderTop: `1px solid ${C.border}` }}>
           <td style={{ padding: '14px 6px 14px 0', color: C.yellow }}>{row.place}</td>
-          <td style={{ maxWidth: 130, overflowWrap: 'anywhere', paddingRight: 8 }}>{row.display_name}<div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{row.hand === 'L' ? 'Left' : 'Right'} · {row.measured_date}</div></td>
-          <td style={{ whiteSpace: 'nowrap', fontWeight: 700 }}>{strength(row.peak_kg)}</td>
+          <td style={{ maxWidth: 130, overflowWrap: 'anywhere', paddingRight: 8 }}>{row.display_name}
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{strength(row.baseline_peak_kg)} → {strength(row.peak_kg)}</div>
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>{row.hand === 'L' ? 'Left' : 'Right'} · {row.baseline_date} → {row.measured_date}</div></td>
+          <td style={{ whiteSpace: 'nowrap', fontWeight: 700, color: C.blue }}>{percent(row.improvement_pct)}</td>
         </tr>)}</tbody>
       </table>}
-      {!loading && !error && !ranking.length && <p>No shared measured peaks for this grip yet.</p>}
+      {!loading && !error && !ranking.length && <p>No shared peak improvements since joining yet.</p>}
     </Card>}
     {loading && <p role="status">Loading community…</p>}
     {error && <div role="status"><p>{error}</p><Btn onClick={() => setReload(n => n + 1)}>Retry</Btn></div>}

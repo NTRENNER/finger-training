@@ -41,7 +41,7 @@ function DomainRanking({ metric, rows, unit, loading }) {
   return <Card style={{ padding: 16, marginBottom: 0, minWidth: 0 }}>
     <h3 style={{ fontSize: 16, margin: '0 0 8px' }}>{balanced ? 'Balanced curve improvement' : metric.label}</h3>
     <p style={{ color: C.muted, fontSize: 12, margin: '0 0 16px', lineHeight: 1.5 }}>
-      {balanced ? 'Estimated change · Same curve durations' : `Estimated force at ${ZONE_REF_T[metric.key]} seconds`}
+      {balanced ? 'Ranked by percentage improvement · Same curve durations' : `Percentage improvement in estimated force at ${ZONE_REF_T[metric.key]} seconds`}
     </p>
     {rows.length ? <>
       <RankingRows rows={rows.slice(0, firstCount)} unit={unit} balanced={balanced} />

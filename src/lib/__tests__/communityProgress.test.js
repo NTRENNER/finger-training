@@ -10,6 +10,8 @@ function overlay(ratios = [1, 1.02, 1.02, 0.95]) {
     maxHoldByDate: new Map(dates.map(d => [d, 240])) };
 }
 const history = dates.map(date => rep(date));
+// A community join date before every fixture date.
+const JOINED = '2025-12-15T12:00:00Z';
 test('balanced and six subdomains use existing comparisons; earned stars survive later dips', () => {
   const result = communityProgress(history, { Crusher: overlay() }, dates.at(-1));
   expect(result.current).toHaveLength(7);
@@ -81,4 +83,53 @@ test('valid Peak Test is eligible despite not being failure evidence; redo/inval
     force_recording: { peak_valid: true, session_protocol: { id: 'peak_test', version: 2 } } });
   expect(communityPeaks([peak], dates[3])).toHaveLength(1);
   expect(communityPeaks([{ ...peak, end_reason: 'user_interruption' }], dates[3])).toEqual([]);
+});
+
+test('peak improvement compares first max-intent day best with best later same-hand peak, at full precision', () => {
+  const rows = [rep(dates[0], { peak_force_kg: 10, target_duration: 120 }),
+    rep(dates[1], { peak_force_kg: 40, target_duration: 5 }),
+    rep(dates[1], { peak_force_kg: 50.123456789, target_duration: 5 }),
+    rep(dates[2], { peak_force_kg: 60.123456789, target_duration: 5 }),
+    rep(dates[3], { peak_force_kg: 55, target_duration: 5 }),
+    rep(dates[3], { peak_force_kg: 80, target_duration: 120 }),
+    rep(dates[2], { hand: 'R', peak_force_kg: 100, target_duration: 5 })];
+  const snapshots = communityPeaks(rows.reverse(), dates[3], JOINED);
+  expect(snapshots.find(r => r.hand === 'L')).toEqual({ grip: 'Crusher', hand: 'L', peak_kg: 80,
+    measured_date: dates[3], baseline_peak_kg: 50.123456789, baseline_date: dates[1],
+    improvement_peak_kg: 60.123456789, improvement_date: dates[2] });
+  expect(snapshots.find(r => r.hand === 'R').baseline_peak_kg).toBeUndefined();
+});
+
+test('peak improvement excludes invalid, manual, future, other-grip and single-date comparisons', () => {
+  const baseline = rep(dates[0], { peak_force_kg: 50, target_duration: 5 });
+  const invalid = [rep(dates[1], { peak_force_kg: 80, failure_valid: false }),
+    rep(dates[1], { peak_force_kg: 80, load_provenance: 'manual' }),
+    rep('2027-01-01', { peak_force_kg: 80 }), rep(dates[1], { grip: 'Prime', peak_force_kg: 80 })];
+  expect(communityPeaks([baseline, ...invalid], dates[3], JOINED).every(r => !r.baseline_date)).toBe(true);
+  const gain = rep(dates[1], { peak_force_kg: 55, target_duration: 5 });
+  expect(communityPeaks([baseline, gain], dates[3], JOINED)[0].improvement_peak_kg).toBe(55);
+  expect(communityPeaks([baseline, { ...gain, failure_valid: false }], dates[3], JOINED)[0].baseline_date).toBeUndefined();
+  expect(communityPeaks([baseline, { ...gain, date: dates[0] }], dates[3], JOINED)[0].baseline_date).toBeUndefined();
+  expect(communityPeaks([baseline, { ...gain, peak_force_kg: 49 }], dates[3], JOINED)[0].baseline_date).toBeUndefined();
+});
+
+test('Peak Test and legacy missing targets retain existing max-intent eligibility', () => {
+  const first = rep(dates[0], { peak_force_kg: 50 });
+  const peak = rep(dates[1], { peak_force_kg: 55, target_duration: 5, failure_valid: false,
+    end_reason: 'peak_test_complete', load_provenance: 'measured_force',
+    force_recording: { peak_valid: true, session_protocol: { id: 'peak_test', version: 2 } } });
+  expect(communityPeaks([first, peak], dates[3], JOINED)[0].improvement_peak_kg).toBe(55);
+  expect(communityPeaks([first, { ...peak, end_reason: 'user_interruption' }], dates[3], JOINED)[0].baseline_date).toBeUndefined();
+});
+
+test('peak improvement starts from the first max-intent day since joining', () => {
+  const rows = [rep(dates[0], { peak_force_kg: 60, target_duration: 5 }),
+    rep(dates[1], { peak_force_kg: 50, target_duration: 5 }),
+    rep(dates[2], { peak_force_kg: 55, target_duration: 5 })];
+  // A stronger day before joining is neither the baseline nor a gain.
+  expect(communityPeaks(rows, dates[3], `${dates[1]}T12:00:00Z`)[0]).toMatchObject({ peak_kg: 60,
+    baseline_peak_kg: 50, baseline_date: dates[1], improvement_peak_kg: 55, improvement_date: dates[2] });
+  expect(communityPeaks(rows, dates[3], `${dates[2]}T12:00:00Z`)[0].baseline_date).toBeUndefined();
+  expect(communityPeaks(rows, dates[3])[0].baseline_date).toBeUndefined();
+  expect(communityPeaks(rows, dates[3], 'not a date')[0].baseline_date).toBeUndefined();
 });
