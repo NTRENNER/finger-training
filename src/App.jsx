@@ -269,12 +269,10 @@ export default function App() {
   // Auth subscription + setUser are owned by useAuth() above.
 
   // ── Daily cookedness cache (LS + cloud reconcile) ────────
-  // Provides cookedOnDate(date) + saveCooked(date, cooked) for the
-  // retroactive-cookedness slider on AnalysisView's session-detail
-  // modal. dailyState (the raw map) is fed into useRepHistory below
-  // so the freshMap rebuild can apply per-rep capacity multipliers
-  // without the curve fit needing to know about the cookedness model.
-  const { dailyState, cookedOnDate, saveCooked } = useDailyState({ user, syncSignal });
+  // Legacy day ratings. Ratings now belong to sessions (session_cooked);
+  // cookedOnDate(date) lets History show a day rating for a session that
+  // has none. dailyState (the raw map) is fed into useRepHistory below.
+  const { dailyState, cookedOnDate } = useDailyState({ user, syncSignal });
 
   // ── Rep history + freshMap + cloud reconcile + CRUD ──────
   // (see src/hooks/useRepHistory.js)
@@ -803,7 +801,6 @@ export default function App() {
           onDeleteWorkoutSession={deleteWorkoutSession}
           onUpdateWorkoutSession={handleWorkoutSessionSaved}
           cookedOnDate={cookedOnDate}
-          onSaveCooked={saveCooked}
           onSaveSessionCooked={updateSessionCooked}
           onDownloadWorkoutCSV={(log) => {
             // Build the migrated name index here so the CSV column for

@@ -1,10 +1,11 @@
 // ─────────────────────────────────────────────────────────────
 // useDailyState — per-date cookedness cache (0–10 scalar)
 // ─────────────────────────────────────────────────────────────
-// Daily "cookedness" is the user's pre-session subjective fatigue
-// load (0 = fresh, 10 = wrecked). Captured at session start by the
-// Setup tab's cookedness slider — and only when the user actually
-// sets it — then pushed to Supabase's daily_state table.
+// Daily "cookedness" is a LEGACY day-level subjective fatigue rating
+// (0 = fresh, 10 = wrecked) in Supabase's daily_state table. Since
+// 2026-11-12 ratings belong to sessions (reps.session_cooked): the app
+// no longer writes day ratings, and History shows a day rating only for
+// a session that has none. This hook keeps the existing rows readable.
 //
 // This hook adds an OFFLINE cache + RETROACTIVE editing path:
 //

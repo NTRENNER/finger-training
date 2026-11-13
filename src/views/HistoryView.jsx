@@ -101,14 +101,12 @@ export function HistoryView({
   onDeleteWorkoutSession = () => {},
   onUpdateWorkoutSession = () => {},
   onDownloadWorkoutCSV = () => {},
-  // Retroactive cookedness wiring. Day-level: cookedOnDate(date)
-  // reads, onSaveCooked(date, cooked|null) writes daily_state.
-  // Session-level override: onSaveSessionCooked(sessionKey, cooked|null)
-  // updates the session_cooked column on every rep in the session.
-  // All default to no-ops so the view still mounts cleanly without
-  // these wired in.
+  // Retroactive cookedness wiring. onSaveSessionCooked(sessionKey,
+  // cooked|null) updates the session_cooked column on every rep in the
+  // session. cookedOnDate(date) reads a legacy day rating, shown only
+  // for a session without its own. Both default to no-ops so the view
+  // still mounts cleanly without these wired in.
   cookedOnDate = () => null,
-  onSaveCooked = () => {},
   onSaveSessionCooked = () => {},
   onDownloadClimbingCSV = () => {},
   gripPresets = [],
@@ -1342,14 +1340,13 @@ export function HistoryView({
                 </div>
               </div>
             )}
-            {/* Retroactive cookedness — day-default with per-session
-                override. Day mode edits daily_state.cooked (affects
-                every session that day); session mode edits the
-                session_cooked column on this session's reps only
-                (multi-session days where the cookedness changed
-                between sessions: morning fresh, midday climb, evening
-                cooked). Ratings update the diary. Recorded session adjustments stay fixed;
-                only legacy explicit session ratings supply an estimated adjustment. */}
+            {/* Retroactive cookedness — every session has its own rating
+                (session_cooked on this session's reps), so a fresh
+                warm-up and a cooked session after climbing on the same
+                day stay separate. A legacy day rating (daily_state) only
+                fills in for a session that has none. Ratings update the
+                diary. Recorded session adjustments stay fixed; only legacy
+                explicit session ratings supply an estimated adjustment. */}
             {!sess.reps?.[0]?.session_adjustment && sess.reps?.[0]?.session_cooked == null && cookedOnDate(sess.date) > 0 && (
               <div style={{ color: C.muted, fontSize: 12, marginBottom: 8 }}>
                 No session load adjustment was recorded. The day rating is not used to adjust this session’s capacity.
@@ -1359,7 +1356,6 @@ export function HistoryView({
               Ratings can be corrected here without changing how this workout informs future loads.
             </div>}
             <CookednessSlider
-              date={sess.date}
               dayValue={cookedOnDate(sess.date)}
               sessionValue={(() => {
                 // session_cooked is stamped on every rep — read from
@@ -1369,8 +1365,7 @@ export function HistoryView({
                 const v = sess.reps?.[0]?.session_cooked;
                 return v == null ? null : Number(v);
               })()}
-              onSaveDay={(v) => onSaveCooked(sess.date, v)}
-              onSaveSessionOverride={(v) => onSaveSessionCooked(sessKey, v)}
+              onSave={(v) => onSaveSessionCooked(sessKey, v)}
             />
           </Card>
         );

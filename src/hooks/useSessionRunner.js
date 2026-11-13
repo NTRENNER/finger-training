@@ -69,7 +69,6 @@ import { preparePrediction, completePrediction } from '../model/predictionTracki
 import { sessionAdjustment } from "../model/cookedScaling.js";
 import { MAX_OPTIONAL_SETS, isSetComplete } from "../model/setRecommendation.js";
 import { snapshotVolumePlan, isVolumeSetComplete } from "../model/volumeSession.js";
-import { pushDailyState } from "../lib/sync.js";
 import { saveSessionSnapshot, readSessionSnapshot, clearSessionSnapshot } from "../lib/sessionResume.js";
 import { buildMixedLoadModel, prepareMixedPrediction, completeMixedPrediction } from '../model/mixedLoadPrediction.js';
 import { mixedReadinessModel, prepareAdaptiveMixedPrediction, mixedLoadProtocolFields } from '../model/mixedLoadPrescription.js';
@@ -314,12 +313,10 @@ export function useSessionRunner({
           : buildMixedLoadModel(history, cfg.grip, h, startedDay)])) : {};
     predictionModelsRef.current = !cfg.mixedDomainPlan && !cfg.peakTest
       ? preparedModels(cfg, startedDay) : {};
-    // Persist a STATED cookedness as the day's value, so later
-    // sessions and retroactive curve fits see it. Skipped entirely
-    // when the user didn't state one. Fire-and-forget.
-    if (cfg.cooked != null) {
-      pushDailyState(startedDay, cfg.cooked);
-    }
+    // A stated rating belongs to this session only (session_cooked and
+    // session_adjustment on its reps). It is not written as the day's
+    // rating: a fresh warm-up and a cooked session after climbing on the
+    // same day must keep separate ratings.
     const startedAt = nowISO();
     // Freeze the plan card's decision record (model/decisionLog.js) with the
     // loads this session actually started from. Copied onto every rep.

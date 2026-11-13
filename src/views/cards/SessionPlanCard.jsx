@@ -19,11 +19,9 @@ import { trainingPurpose } from "../../model/trainingPurpose.js";
 //      it clears any tile override and makes the recommendation the active
 //      selection (highlighted bright). When the user has overridden via an
 //      alternative tile, this button dims but still surfaces the curve pick.
-//   2. Cookedness slider — "How cooked today?" (0–10, defaults to fresh).
-//      Scales the prescribed LOAD per-grip via exp(-β·c) without
-//      changing which zone the engine picks. Upserted to daily_state
-//      on session start so the server-side trigger can update β from
-//      every rep-1 insert.
+//   2. Cookedness slider — "How cooked now?" (0–10, null until touched).
+//      Saved with this session only; a load reduction applies only when
+//      the athlete chooses it (see model/cookedScaling.js).
 //   3. Override indicator + protocol controls — hangs/rest/time strip,
 //      hangs and rest sliders. Defaults track the active selection's
 //      T but stick once touched.
@@ -103,10 +101,10 @@ export function SessionPlanCard({
   // back up so the workout runner uses it. Auto-fires whenever any of
   // those change.
   onApplyPlan,
-  // "How cooked today?" slider state (0 = fresh → 10 = wrecked). Owned
-  // by SetupView; flows through to useSessionRunner which upserts it to
-  // daily_state on session start. Optional: null means "not stated"
-  // and no automatic load reduction is applied.
+  // "How cooked now?" slider state (0 = fresh → 10 = wrecked). Owned
+  // by SetupView; flows through to useSessionRunner, which saves it with
+  // this session. Optional: null means "not stated" and no automatic load
+  // reduction is applied.
   cooked,
   onCookedChange,
   adjustLoadForFatigue = false,
@@ -997,7 +995,7 @@ export function SessionPlanCard({
       }}>
         <div style={{ flex: "0 0 auto" }}>
           <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>
-            How cooked today?
+            How cooked now?
           </div>
           <div style={{ fontSize: 10, color: C.muted }}>
             {cooked == null
