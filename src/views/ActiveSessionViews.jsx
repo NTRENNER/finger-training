@@ -33,7 +33,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { C } from "../ui/theme.js";
 import { Card, Btn, Label, PageFrame } from "../ui/components.jsx";
-import { fmtW, fmtTime, fromDisp, toDisp } from "../ui/format.js";
+import { fmtW, fmtTime, fmtDay, fromDisp, toDisp } from "../ui/format.js";
+import { AWARD_THRESHOLDS } from "../model/sessionAwards.js";
 import { BigTimer, ForceGauge } from "./cards/LiveForceCard.jsx";
 
 import { suggestWeight, prescribedLoad } from "../model/prescription.js";
@@ -156,6 +157,10 @@ const AWARD_COPY = [
     line: a => `${pctOver(a.ratio)} more force than your curve expected` },
   { type: "recommendation", emoji: "🎯", title: "Beat the recommendation",
     line: a => `held ${pctOver(a.timeRatio)} longer at the recommended weight` },
+  { type: "last_time", emoji: "⬆️", title: "Beat last time",
+    line: a => a.forceRatio >= AWARD_THRESHOLDS.lastTimeForceGain && a.timeRatio >= 1
+      ? `${pctOver(a.forceRatio)} more force, at least as long as ${fmtDay(a.previousDate)}`
+      : `held ${pctOver(a.timeRatio)} longer than ${fmtDay(a.previousDate)}` },
   { type: "recovery", emoji: "🔋", title: "Strong recovery",
     line: () => "second rep lasted longer than expected" },
 ];

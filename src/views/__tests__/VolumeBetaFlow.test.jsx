@@ -86,6 +86,15 @@ test('the set summary names each award earned, per hand', () => {
   expect(screen.getByText('Strong recovery')).toBeInTheDocument();
   expect(screen.queryByText('Beat your curve')).not.toBeInTheDocument();
 });
+test('beat last time names the gain and the earlier day', () => {
+  render(<SessionSummaryView config={config} reps={rows(1)} onDone={() => {}} awards={[
+    { type: 'last_time', hand: 'L', forceRatio: 7.0 / 6.4, timeRatio: 1.02, previousDate: '2026-11-04' },
+    { type: 'last_time', hand: 'R', forceRatio: 1.0, timeRatio: 1.2, previousDate: '2026-11-04' }]} />);
+  expect(screen.getByText('Beat last time')).toBeInTheDocument();
+  // This file's clock is in 1970, so the earlier day carries its year.
+  expect(screen.getByText('Left hand: 9% more force, at least as long as Nov 4, 2026')).toBeInTheDocument();
+  expect(screen.getByText('Right hand: held 20% longer than Nov 4, 2026')).toBeInTheDocument();
+});
 test.each([[rows(1).slice(0, 3)], [rows(1).map((r, i) => i === 1 ? { ...r, failure_valid: false } : r)]])('incomplete or interrupted sets do not offer set two', reps => {
   render(<SessionSummaryView config={config} reps={reps} onAddSet={() => {}} onDone={() => {}} />);
   expect(screen.queryByRole('button', { name: 'Continue to set 2' })).not.toBeInTheDocument();

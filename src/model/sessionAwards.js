@@ -1,25 +1,28 @@
 // ─────────────────────────────────────────────────────────────
 // SESSION AWARDS — what a finished finger session earned
 // ─────────────────────────────────────────────────────────────
-// Four separate achievements, each judged per hand on set one:
+// Five separate achievements, each judged per hand on set one:
 //
 //   heaviest       — the level for this grip and zone went up (levels.js).
 //   curve          — the opening hold carried more force than the curve
 //                    frozen before the session expected for its duration.
 //   recommendation — the opening hold met the recommended weight and
 //                    outlasted the recommended time.
+//   last_time      — the opening hold beat the previous day's opening hold
+//                    for this grip, hand and zone: more force for at least
+//                    as long, or clearly longer at the same force or more.
 //   recovery       — the second hold kept more of the first hold's time
 //                    than the recovery model expected, after a first hold
 //                    that reached its target.
 //
-// Only the opening hold can earn `curve` and `recommendation`: later holds
-// are fatigued. Awards are read-only over rep history and never feed a
+// Only the opening hold can earn `curve`, `recommendation` and `last_time`:
+// later holds are fatigued. Awards are read-only over rep history and never feed a
 // prescription. Thresholds were set from a replay of real sessions
 // (scripts/awards-replay.mjs) so that each award stays uncommon.
 
 import { zoneOf } from "./zones.js";
 import { calcLevel } from "./levels.js";
-import { buildPhysModel } from "./repCurveData.js";
+import { buildPhysModel, findPrevSessionReps } from "./repCurveData.js";
 import { buildRecoveryBundle } from "./recoveryDynamics.js";
 import { isCapacityEvidenceRep, loadProvenance } from "./forceRecording.js";
 
@@ -29,14 +32,29 @@ export const AWARD_THRESHOLDS = {
   // Opening hold: force ÷ recommended weight, and time ÷ recommended time.
   recommendationLoadRatio: 0.98,
   recommendationTimeRatio: 1.25,
+  // Opening hold vs the previous day's opening hold (same grip, hand, zone):
+  // force ratio ≥ lastTimeForceGain while lasting at least as long, or time
+  // ratio ≥ lastTimeTimeGain at ≥ lastTimeForceFloor of the force.
+  lastTimeForceGain: 1.05,
+  lastTimeTimeGain: 1.15,
+  lastTimeForceFloor: 0.98,
   // Rep 2 retention minus the model's expected retention (fraction of rep 1).
   recoveryGap: 0.15,
 };
 
-export const AWARD_ORDER = ["heaviest", "curve", "recommendation", "recovery"];
+export const AWARD_ORDER = ["heaviest", "curve", "recommendation", "last_time", "recovery"];
 
 const positive = n => Number.isFinite(n) && n > 0;
 const isSetOne = r => (r.set_num ?? 1) === 1;
+const measuredForce = r => ["measured_force", "legacy_measured"].includes(loadProvenance(r));
+
+// The previous day's opening hold for this grip, hand and zone (set one),
+// using the same comparable-hold rules as the rest-screen chart.
+function previousOpener(before, opener, grip, hand, targetTime) {
+  const reps = findPrevSessionReps(before, { grip, hand, beforeDate: opener.date, targetDuration: targetTime });
+  const prev = reps?.find(r => r.hand === hand && Number(r.rep_num ?? 1) === 1);
+  return prev && measuredForce(prev) && positive(prev.avg_force_kg) && positive(prev.actual_time_s) ? prev : null;
+}
 
 function openerFor(reps, hand) {
   const rep = reps.find(r => r.hand === hand && isSetOne(r) && Number(r.rep_num ?? 1) === 1);
@@ -68,14 +86,27 @@ export function sessionAwardMetrics({ before = [], reps = [], grip, targetTime, 
       timeRatio: opener.actual_time_s / opener.target_duration,
     } : null;
 
+    const prev = opener ? previousOpener(before, opener, grip, hand, targetTime) : null;
+    const lastTime = prev ? {
+      forceRatio: opener.avg_force_kg / prev.avg_force_kg,
+      timeRatio: opener.actual_time_s / prev.actual_time_s,
+      previousDate: prev.date,
+    } : null;
+
     let recoveryGap = null;
     if (opener && positive(opener.target_duration) && opener.actual_time_s >= opener.target_duration) {
       const bundle = buildRecoveryBundle({ reps: mine.filter(isSetOne), restSeconds,
         physModel: buildPhysModel(before, hand, grip) });
       if (bundle.confidence === "measured" && Number.isFinite(bundle.gapAtTarget)) recoveryGap = bundle.gapAtTarget;
     }
-    return { hand, zone, levelBefore, levelAfter, curveRatio, recommendation, recoveryGap };
+    return { hand, zone, levelBefore, levelAfter, curveRatio, recommendation, lastTime, recoveryGap };
   });
+}
+
+// More force for at least as long, or clearly longer at the same force.
+export function beatLastTime({ forceRatio, timeRatio }, thresholds = AWARD_THRESHOLDS) {
+  return (forceRatio >= thresholds.lastTimeForceGain && timeRatio >= 1)
+    || (timeRatio >= thresholds.lastTimeTimeGain && forceRatio >= thresholds.lastTimeForceFloor);
 }
 
 // Awards earned by a finished session: [{ type, hand, ...detail }], ordered
@@ -90,6 +121,9 @@ export function sessionAwards(input, thresholds = AWARD_THRESHOLDS) {
     if (m.recommendation && m.recommendation.loadRatio >= thresholds.recommendationLoadRatio
       && m.recommendation.timeRatio >= thresholds.recommendationTimeRatio) {
       awards.push({ type: "recommendation", hand: m.hand, ...m.recommendation });
+    }
+    if (m.lastTime && beatLastTime(m.lastTime, thresholds)) {
+      awards.push({ type: "last_time", hand: m.hand, ...m.lastTime });
     }
     if (m.recoveryGap != null && m.recoveryGap >= thresholds.recoveryGap) {
       awards.push({ type: "recovery", hand: m.hand, gap: m.recoveryGap });

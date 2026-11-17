@@ -12,7 +12,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { sessionAwardMetrics, sessionAwards, AWARD_THRESHOLDS, AWARD_ORDER } from "../src/model/sessionAwards.js";
+import { sessionAwardMetrics, sessionAwards, beatLastTime, AWARD_THRESHOLDS, AWARD_ORDER } from "../src/model/sessionAwards.js";
 import { calcLevel, getBaseline } from "../src/model/levels.js";
 import { ZONE_KEYS } from "../src/model/zones.js";
 
@@ -67,6 +67,15 @@ for (const t of [1.0, 1.1, 1.15, 1.25, 1.4]) {
 console.log("\nRecovery gap (rep 2 retention − expected), first hold reached target");
 console.log("  ", quantiles(gap));
 for (const t of [0.05, 0.10, 0.15, 0.20, 0.30]) console.log(`   ≥${t}: ${share(gap, x => x >= t)}`);
+
+const last = perHand.filter(m => m.lastTime).map(m => m.lastTime);
+console.log("\nLast time (opening hold ÷ previous day's opening hold, same grip, hand and zone)");
+console.log("   force ratio", quantiles(last.map(x => x.forceRatio)));
+console.log("   time ratio ", quantiles(last.map(x => x.timeRatio)));
+for (const [f, t] of [[1.03, 1.10], [1.05, 1.15], [1.05, 1.25], [1.08, 1.25]]) {
+  const th = { ...AWARD_THRESHOLDS, lastTimeForceGain: f, lastTimeTimeGain: t };
+  console.log(`   force≥${f} & time≥1, or time≥${t} & force≥${th.lastTimeForceFloor}: ${share(last, x => beatLastTime(x, th))}`);
+}
 
 console.log("\nAwards at current thresholds", JSON.stringify(AWARD_THRESHOLDS));
 for (const type of AWARD_ORDER) {

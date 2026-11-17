@@ -67,6 +67,41 @@ test("a level-up is reported as the heaviest award, ahead of the others", () => 
     rep({ id: "b", date: "2026-10-08", session_id: "b", avg_force_kg: 10.2, actual_time_s: 200 }),
   ];
   const awards = run([rep()], before);
-  expect(types(awards)).toEqual(["heaviest:L", "recommendation:L"]);
+  // 13.7 kg for 288.6 s also beats Oct 8's 10.2 kg for 200 s.
+  expect(types(awards)).toEqual(["heaviest:L", "recommendation:L", "last_time:L"]);
   expect(awards[0].level).toBeGreaterThan(1);
+});
+
+// Replays Micro 2026-11-04 → 2026-11-16 (160 s, 6.4 kg prescribed): the same
+// times with about 9% more force. No other award fired that day.
+const micro = (over = {}) => rep({ grip: "Micro", target_duration: 160, prescribed_load_kg: 6.4, ...over });
+// Nov 2's 120 s session (8.2 kg for 146.7 s) set the strength/endurance level,
+// so neither day levels up; it is another zone's session, not "last time".
+const nov4 = [micro({ id: "n2L", date: "2026-11-02", session_id: "nov2", target_duration: 120, avg_force_kg: 8.2, actual_time_s: 146.7 }),
+  micro({ id: "n4L", date: "2026-11-04", session_id: "nov4", avg_force_kg: 6.4, actual_time_s: 161.7 }),
+  micro({ id: "n4R", date: "2026-11-04", session_id: "nov4", hand: "R", avg_force_kg: 6.4, actual_time_s: 190.2 })];
+const nov16 = [micro({ date: "2026-11-16", session_id: "nov16", avg_force_kg: 7.0, actual_time_s: 165.2 }),
+  micro({ date: "2026-11-16", session_id: "nov16", hand: "R", avg_force_kg: 7.0, actual_time_s: 191.3 })];
+
+test("more force for at least as long as the previous day's opener beats last time", () => {
+  const awards = run(nov16, nov4);
+  expect(types(awards)).toEqual(["last_time:L", "last_time:R"]);
+  expect(awards[0]).toMatchObject({ previousDate: "2026-11-04" });
+  expect(awards[0].forceRatio).toBeCloseTo(7.0 / 6.4);
+});
+
+test("beat last time also counts clearly longer holds at the same force, and nothing less", () => {
+  const today = over => run([micro({ date: "2026-11-16", session_id: "nov16", avg_force_kg: 6.4, actual_time_s: 190, ...over })], nov4);
+  expect(types(today())).toEqual(["last_time:L"]);                          // 18% longer, same force
+  expect(today({ actual_time_s: 180 })).toEqual([]);                        // 11% longer only
+  expect(today({ avg_force_kg: 7.0, actual_time_s: 160 })).toEqual([]);     // more force, but shorter
+  expect(today({ avg_force_kg: 6.0 })).toEqual([]);                         // longer at a lighter weight
+});
+
+test("beat last time compares only a measured opener from an earlier day, in set one", () => {
+  const sameDay = nov4.map(r => ({ ...r, date: "2026-11-16" }));
+  expect(run(nov16, sameDay)).toEqual([]);
+  expect(run(nov16, nov4.map(r => ({ ...r, load_provenance: "manual", manual_load_kg: 6.4 })))).toEqual([]);
+  expect(run(nov16.map(r => ({ ...r, set_num: 2 })), nov4)).toEqual([]);
+  expect(run(nov16, nov4.map(r => ({ ...r, end_reason: "interrupted" })))).toEqual([]);
 });

@@ -383,12 +383,14 @@ export function useSessionRunner({
     }
     setLeveledUp(leveled);
     setNewLevel(maxNewLevel);
-    // Curve, recommendation and recovery awards are judged on set one, so they
-    // are shown once, when that set finishes. Awards must never block saving.
+    // Curve, recommendation, last-time and recovery awards are judged on set
+    // one. They stay on the summary after added sets, which are fatigued
+    // work and cannot earn them. Awards must never block saving.
     let earned = [];
-    if (!config.mixedDomainPlan && !config.peakTest && allReps.every(r => (r.set_num ?? 1) === 1)) {
+    const setOne = allReps.filter(r => (r.set_num ?? 1) === 1);
+    if (!config.mixedDomainPlan && !config.peakTest && setOne.length) {
       try {
-        earned = sessionAwards({ before, reps: allReps, grip: config.grip, targetTime: config.targetTime,
+        earned = sessionAwards({ before, reps: setOne, grip: config.grip, targetTime: config.targetTime,
           hands, restSeconds: config.restTime ?? 20 }).filter(a => a.type !== "heaviest");
       } catch { earned = []; }
     }
