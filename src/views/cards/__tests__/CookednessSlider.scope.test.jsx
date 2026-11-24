@@ -5,7 +5,7 @@ import {CookednessSlider} from "../CookednessSlider.jsx";
 test("a session's own rating is shown and saved for that session only",()=>{
  const onSave=jest.fn();
  render(<CookednessSlider dayValue={0} sessionValue={9} onSave={onSave}/>);
- const slider=screen.getByRole("slider",{name:"Session fatigue rating"});
+ const slider=screen.getByRole("slider",{name:"Session exertion rating"});
  expect(slider).toHaveValue("9");
  fireEvent.change(slider,{target:{value:"8"}});fireEvent.mouseUp(slider);
  expect(onSave).toHaveBeenCalledWith(8);
@@ -16,7 +16,7 @@ test("a session's own rating is shown and saved for that session only",()=>{
 test("a session without its own rating shows a legacy day rating until it gets one",()=>{
  const onSave=jest.fn();
  render(<CookednessSlider dayValue={8} sessionValue={null} onSave={onSave}/>);
- expect(screen.getByRole("slider",{name:"Session fatigue rating"})).toHaveValue("8");
+ expect(screen.getByRole("slider",{name:"Session exertion rating"})).toHaveValue("8");
  expect(screen.queryByRole("button",{name:"clear"})).not.toBeInTheDocument();
 });
 

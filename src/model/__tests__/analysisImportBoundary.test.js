@@ -10,6 +10,7 @@ const analysis=new Set(['performanceTrends','contextualTrendFit','contextualTren
   'trainingExposure','historicalEvaluation','forwardEvaluation','capacityTrendExperiment',
   'adaptiveCapacityExperiment','adaptiveCapacityEvaluation','capacityWindowExperiment']
   .map(name=>path.join(modelDir,`${name}.js`)));
+for (const name of ['trainingPattern', 'coachingEvidence']) analysis.add(path.resolve(modelDir, '../lib', `${name}.js`));
 const roots=['prescription','load','deload','densityLadder','setRecommendation','coaching',
   'mixedLoadPrescription','workout-progression'];
 function dependencies(source){

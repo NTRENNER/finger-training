@@ -83,8 +83,8 @@ export function adherenceNote(history, todayStr) {
   if (sinceLast > med * ADHERENCE_RATIO && sinceLast >= med + ADHERENCE_SLACK_DAYS) {
     const medStr = Math.round(med);
     return {
-      key: "adherence", tone: "warn",
-      text: `It's been ${sinceLast} days since your last finger session — you usually train every ~${medStr}.`,
+      key: "adherence", tone: "info",
+      text: `Last recorded finger training was ${sinceLast} days ago; recent recorded training days were about ${medStr} days apart.`,
     };
   }
   return null;
@@ -115,7 +115,7 @@ export function volumeRampNote(history, todayStr) {
   // and rephrase (deload framing) instead of quoting this text verbatim.
   if (ratio >= RAMP_SPIKE_RATIO) {
     return {
-      key: "ramp-spike", tone: "warn", ratio,
+      key: "ramp-spike", tone: "info", ratio,
       text: `This week's finger volume is running ~${ratio.toFixed(1)}× your monthly average.`,
     };
   }
@@ -144,7 +144,7 @@ export function trendNote(dates, fitScoreAt) {
   const pct = Math.round((now / then - 1) * 100);
   if (pct <= TREND_DOWN_PCT) {
     return {
-      key: "trend-down", tone: "warn",
+      key: "trend-down", tone: "info",
       text: `Modeled capacity has slipped ~${Math.abs(pct)}% over your last ${TREND_SESSIONS} sessions.`,
     };
   }

@@ -23,14 +23,14 @@ const micro = hand => ({
   session_cooked: null, session_adjustment: { version: 1, reported_cooked: null, load_choice: "keep", applied_multiplier: 1 },
 });
 const reps = [peak("L"), peak("R"), micro("L"), micro("R")];
-const values = () => screen.getAllByRole("slider", { name: "Session fatigue rating" }).map(s => s.value).sort();
+const values = () => screen.getAllByRole("slider", { name: "Session exertion rating" }).map(s => s.value).sort();
 
 test("rating one session leaves the other session that day unchanged", () => {
   const onSaveSessionCooked = jest.fn();
   const { rerender } = render(<HistoryView history={reps} cookedOnDate={() => 0} onSaveSessionCooked={onSaveSessionCooked} />);
   expect(values()).toEqual(["0", "0"]);
 
-  const [slider] = screen.getAllByRole("slider", { name: "Session fatigue rating" });
+  const [slider] = screen.getAllByRole("slider", { name: "Session exertion rating" });
   fireEvent.change(slider, { target: { value: "9" } });
   fireEvent.mouseUp(slider);
   expect(onSaveSessionCooked).toHaveBeenCalledTimes(1);

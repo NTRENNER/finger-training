@@ -29,7 +29,7 @@ export function CookednessSlider({
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
         <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5 }}>
-          Cookedness
+          Cookedness · this session
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <div style={{ fontSize: 16, fontWeight: 800, color: effective != null ? C.purple : C.muted }}>
@@ -39,7 +39,7 @@ export function CookednessSlider({
       </div>
       <input
         type="range"
-        aria-label="Session fatigue rating"
+        aria-label="Session exertion rating"
         min="0" max="10" step="1"
         value={draft}
         onChange={(e) => setDraft(Number(e.target.value))}
@@ -53,7 +53,7 @@ export function CookednessSlider({
         </div>
       )}
       <div style={{ fontSize: 10, color: C.muted, marginTop: 6, lineHeight: 1.4, fontStyle: "italic" }}>
-        Higher = more cooked. Changing this rating records how you felt;
+        Higher = more exertion in this session. This rating describes how the session felt;
         it does not change your recorded loads or future recommendations.
       </div>
     </div>

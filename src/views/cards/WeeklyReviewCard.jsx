@@ -22,6 +22,7 @@ import { buildDeloadGuidance, deloadStatus, DELOAD_WEEK_DAYS } from "../../model
 import { saveLS, LS_WORKOUT_LOG_KEY, LS_BW_LOG_KEY, LS_WORKOUT_PLAN_KEY, LS_DELOAD_WEEK_KEY } from "../../lib/storage.js";
 import { useLSValue } from "../../hooks/useLSValue.js";
 import { today } from "../../util.js";
+import { TrainingPatternPanel } from './TrainingPatternPanel.jsx';
 
 function fmt(ymd) {
   return new Date(`${ymd}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -39,7 +40,7 @@ const SECTIONS = [
   ["headsUp", "Data notes"],
 ];
 
-export function WeeklyReviewCard({ history = [], activities = [], pilotEnrollment = null }) {
+export function WeeklyReviewCard({ history = [], activities = [], pilotEnrollment = null, unit = 'lbs' }) {
   const [expanded, setExpanded] = useState(false);
   const workoutSessionsRaw = useLSValue(LS_WORKOUT_LOG_KEY);
   const bwLogRaw = useLSValue(LS_BW_LOG_KEY);
@@ -96,6 +97,8 @@ export function WeeklyReviewCard({ history = [], activities = [], pilotEnrollmen
           <span style={{ color: COLOR[p.kind] || C.text, fontSize: 14, lineHeight: 1.4 }}>{p.text}</span>
         </div>
       ))}
+
+      <TrainingPatternPanel pattern={review.trainingPattern} unit={unit} />
 
       {deloadActive && activeGuidance && (
         <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 14, paddingTop: 12 }}>

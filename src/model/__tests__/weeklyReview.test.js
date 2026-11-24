@@ -32,10 +32,10 @@ describe("assembleReview", () => {
     expect(r.headline).toMatch(/No training logged/i);
   });
 
-  test("low-sample week hedges", () => {
+  test("a recorded training day does not imply a consistency or readiness judgment", () => {
     const r = assembleReview(makeSignals({ totalActivity: 1, finger: { daysThisWeek: 1, daysPerWeekBaseline: 3 }, climbing: { daysThisWeek: 0, daysPerWeekBaseline: 2, prs: [] }, support: { daysThisWeek: 0, staleWorkouts: [] } }));
-    expect(r.headline).toMatch(/Quiet week/i);
-    expect(r.headline).toMatch(/lightly/i);
+    expect(r.headline).toMatch(/training.*this week/i);
+    expect(r.headline).not.toMatch(/quiet|consistent|problem|lightly/i);
   });
 
   test("climbing PR is a win and drives the headline", () => {
@@ -83,7 +83,7 @@ describe("assembleReview", () => {
 
   test("steady week with nothing notable says so", () => {
     const r = assembleReview(makeSignals());
-    expect(r.headline).toMatch(/Steady/i);
+    expect(r.headline).toBe('Training recorded this week.');
     expect(r.points.filter(p => p.kind === "concern")).toHaveLength(0);
   });
 

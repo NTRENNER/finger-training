@@ -35,7 +35,8 @@ describe("adherenceNote", () => {
     expect(n).not.toBeNull();
     expect(n.key).toBe("adherence");
     expect(n.text).toMatch(/9 days/);
-    expect(n.text).toMatch(/~3/);
+    expect(n.text).toMatch(/about 3 days apart/);
+    expect(n.tone).toBe('info');
   });
   test("too little history → null (no cadence known)", () => {
     expect(adherenceNote([rep("2026-07-01"), rep("2026-07-04")], "2026-07-22")).toBeNull();
@@ -62,7 +63,7 @@ describe("volumeRampNote", () => {
     const spiked = [...base, rep("2026-07-05", 300), rep("2026-07-06", 300)];
     const n = volumeRampNote(spiked, "2026-07-07");
     expect(n?.key).toBe("ramp-spike");
-    expect(n.tone).toBe("warn");
+    expect(n.tone).toBe("info");
   });
   test("quiet week flags a drop", () => {
     const n = volumeRampNote(base, "2026-07-12");   // last session 8d ago → acute 0

@@ -40,6 +40,8 @@ import { CLIMBING_PR_CONTEXTS, climbingPrContext } from "./climbingPrBadges.js";
 // ramp) migrated INTO the check-in from the Session Plan card
 // (2026-07-08 — coaching lives in Analysis; the plan card plans).
 import { buildCoachNotes } from "./coachNotes.js";
+import { buildTrainingPattern } from '../lib/trainingPattern.js';
+import { observeBehavioralCoaching } from '../lib/coachingEvidence.js';
 // Exercise-level support tracking (2026-07-08, BACKLOG #6's
 // observational half): workout defs give exercise→workout membership
 // so piecemeal A/B/C elements get seen and credited; the prescriptive
@@ -265,7 +267,7 @@ export function assembleReview(signals) {
   const parts = [];
   if (fd) parts.push(`${fd} finger day${fd === 1 ? "" : "s"}`);
   if (cd) parts.push(`${cd} climbing day${cd === 1 ? "" : "s"}`);
-  if (sd) parts.push(`${sd} support session${sd === 1 ? "" : "s"}`);
+  if (sd) parts.push(`${sd} support day${sd === 1 ? "" : "s"}`);
   const activityStr = parts.length ? parts.join(", ") : "nothing logged";
   const lighter = finger.daysPerWeekBaseline >= 1 && fd < finger.daysPerWeekBaseline * LOW_WEEK_FRAC;
   if (lighter && recovery.level === "green") {
@@ -277,7 +279,7 @@ export function assembleReview(signals) {
   // HEADLINE — lead with the single biggest true story.
   let headline;
   if (totalActivity < 2) {
-    headline = `Quiet week — ${activityStr}. Small samples, so take this lightly.`;
+    headline = totalActivity ? 'Training recorded this week.' : 'No training logged this week.';
   } else if (wins.length) {
     headline = wins.length === 1 ? `Strong week — you've got a win to bank.` : `Big week — ${wins.length} things went right.`;
   } else if (recovery.level === "red") {
@@ -285,9 +287,9 @@ export function assembleReview(signals) {
   } else if (recovery.level === "yellow") {
     headline = `Recent rep-2 comparisons were below baseline.`;
   } else if (concerns.length) {
-    headline = `Decent week, with one thing to tidy up.`;
+    headline = `Recorded training gaps this week.`;
   } else {
-    headline = `Steady, consistent week — nothing to flag.`;
+    headline = 'Training recorded this week.';
   }
 
   const points = [...wins, ...concerns.slice(0, 2), ...info.slice(0, 1)];
@@ -337,14 +339,18 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   const fingerReps = (history || []).filter(r => r && !isPeakMeasurement(r) && r.date && Number(r.actual_time_s) > 0);
   const grips = [...new Set(fingerReps.map(r => r.grip).filter(Boolean))].sort();
 
+  const trainingPattern = buildTrainingPattern(history, activities, { start: d7, end: refDate });
+
   // ── Volume & zone coverage, last 7 days, per grip ──
   const volume = {};
-  for (const g of grips) {
+  for (const summary of trainingPattern.byGrip) {
+    const g = summary.grip;
     const gr7 = fingerReps.filter(r => r.grip === g && r.date >= d7 && r.date <= refDate);
-    if (!gr7.length) continue;
     volume[g] = {
-      sessions: distinctDates(gr7),
-      tutS: Math.round(sum(gr7.map(r => Number(r.actual_time_s) || 0))),
+      days: summary.trainingDays,
+      blocks: summary.blocks,
+      unidentifiedReps: summary.unidentifiedReps,
+      tutS: Math.round(summary.workSeconds),
       zones: new Set(gr7.map(r => zoneOf(r.target_duration || r.actual_time_s))).size,
     };
   }
@@ -399,7 +405,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
     ? sent7.reduce((b, c) => (gradeRank(c.grade) > gradeRank(b.grade) ? c : b))
     : null;
   const climbCtx = {
-    sessions: distinctDates(climbs7),
+    days: distinctDates(climbs7),
     count: climbs7.length,
     disciplines: [...new Set(climbs7.map(a => a.discipline).filter(Boolean))],
     hardestSend: hardest ? hardest.grade : null,
@@ -564,7 +570,7 @@ export function gatherCheckInSignals(history = [], activities = [], workoutSessi
   let behaviorNotes = [];
   try { behaviorNotes = buildCoachNotes(history, { todayStr: refDate }); } catch { behaviorNotes = []; }
 
-  return { ...base, volume, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates: focus.slice(0, 3) };
+  return { ...base, volume, trainingPattern, staleZones, perf, climbCtx, bw, dataQuality, behaviorNotes, supportDetail, partialCredit, supportNudge, focusCandidates: focus.slice(0, 3) };
 }
 
 export function assembleCheckIn(signals) {
@@ -616,10 +622,10 @@ export function assembleCheckIn(signals) {
   for (const g of gripsTrained) {
     const v = volume[g];
     const min = Math.round(v.tutS / 60 * 10) / 10;
-    did.push(`${g}: ${v.sessions} session${v.sessions === 1 ? "" : "s"}, ~${min} min under tension, ${v.zones} zone${v.zones === 1 ? "" : "s"} touched.`);
+    did.push(`${g}: ${v.days} training day${v.days === 1 ? "" : "s"}, ${v.blocks} identified block${v.blocks === 1 ? "" : "s"}${v.unidentifiedReps ? ' (some block identities unknown)' : ''}, ~${min} min recorded activity, ${v.zones} zone${v.zones === 1 ? "" : "s"} touched.`);
   }
-  if (climbCtx && climbCtx.sessions > 0) {
-    did.push(`Climbing: ${climbCtx.sessions} session${climbCtx.sessions === 1 ? "" : "s"}` +
+  if (climbCtx && climbCtx.days > 0) {
+    did.push(`Climbing: ${climbCtx.days} day${climbCtx.days === 1 ? "" : "s"}` +
       (climbCtx.disciplines.length ? ` (${climbCtx.disciplines.join(", ")})` : "") +
       (climbCtx.hardestSend ? `, hardest send ${climbCtx.hardestSend}` : "") +
       (climbCtx.avgRpe != null ? `, avg RPE ${climbCtx.avgRpe}` : "") + ".");
@@ -701,20 +707,20 @@ export function assembleCheckIn(signals) {
     if (dataQuality.noLoad > 0) {
       headsUp.push(`${dataQuality.noLoad} rep${dataQuality.noLoad === 1 ? "" : "s"} this month with no usable load (${listStr(dataQuality.noLoadList)}) — fits skip them; add manual loads in History if they were real.`);
     }
-    if (dataQuality.tinySessions > 0) {
-      headsUp.push(`${dataQuality.tinySessions} session${dataQuality.tinySessions === 1 ? "" : "s"} with ≤2 reps — accidental starts? ${listStr(dataQuality.tinyList)}. Delete in History if so.`);
-    }
+    // A short logged session is valid behavior, not evidence of a logging
+    // mistake, poor adherence, or a need to remove an inconvenient result.
     if (dataQuality.multiDateSessions > 0) {
       headsUp.push(`${dataQuality.multiDateSessions} session${dataQuality.multiDateSessions === 1 ? "" : "s"} spanning multiple dates (${listStr(dataQuality.multiDateList)}) — worth a look in History.`);
     }
   }
-  if (!headsUp.length) headsUp.push("Nothing odd — data looks clean.");
 
   return {
     range: signals.range,
     headline: digest.headline,
     points: compactPoints,
     sections: { did, moving, stuck, focus, headsUp },
+    trainingPattern: signals.trainingPattern,
+    coaching: observeBehavioralCoaching(behaviorNotes),
   };
 }
 

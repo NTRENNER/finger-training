@@ -2,6 +2,7 @@ import React from 'react';
 import { act, render, renderHook, fireEvent, screen, waitFor } from '@testing-library/react';
 import { useSessionRunner } from '../../hooks/useSessionRunner.js';
 import { AutoRepSessionView, ActiveSessionView, RestView, SwitchHandsView, BetweenSetRestView, SessionSummaryView } from '../ActiveSessionViews.jsx';
+import { C } from '../../ui/theme.js';
 jest.mock('../../lib/sync.js',()=>({pushDailyState:jest.fn()}));
 jest.mock('../cards/RepCurveChart.jsx', () => ({ RepCurveChart: props => <div data-testid="hold-time-chart">{JSON.stringify(props)}</div> }));
 jest.mock('../cards/RecoveryChart.jsx', () => ({ RecoveryChart: () => null }));
@@ -122,6 +123,22 @@ test('a fully recorded prescribed set is described as complete', () => {
     rep_num:i+1,set_num:1,hand:'L',actual_time_s:40,avg_force_kg:20,failure_valid:true
   }))} onDone={() => {}} />);
   expect(screen.getByRole('heading', {name:'Recommended Set Complete'})).toBeInTheDocument();
+});
+
+test('valid efforts below target remain complete recorded work with neutral result styling', () => {
+  const rows = Array.from({ length: 4 }, (_, i) => ({ id: `short-${i}`, rep_num: i + 1, set_num: 1,
+    hand: 'L', actual_time_s: 12, target_duration: 40, avg_force_kg: 20, failure_valid: true }));
+  render(<SessionSummaryView config={config} reps={rows} onDone={() => {}} />);
+  expect(screen.getByRole('heading', { name: 'Recommended Set Complete' })).toBeInTheDocument();
+  for (const cell of screen.getAllByRole('cell', { name: '12s', exact: true })) expect(cell).toHaveStyle({ color: C.text });
+  expect(screen.queryByText('Interrupted')).not.toBeInTheDocument();
+});
+
+test('a short valid hold in rest is neutral rather than a missed-target warning', () => {
+  render(<RestView lastRep={{ actualTime: 12, targetTime: 40, avgForce: 20, failureValid: true }}
+    restSeconds={20} repNum={1} repsPerSet={4} onRestDone={() => {}} />);
+  expect(screen.getByText('12s')).toHaveStyle({ color: C.text });
+  expect(screen.queryByText('Interrupted')).not.toBeInTheDocument();
 });
 
 test('regular short holds do not stop at five seconds or when force exceeds the selected load', () => {

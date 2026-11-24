@@ -11,6 +11,16 @@ const rep = (date, grip, target, actual, load = 10, extra = {}) => ({
 const REF = "2026-07-05";
 
 describe("gatherCheckInSignals", () => {
+  test('two Micro blocks plus one Crusher block are one day and three blocks, with silent coaching', () => {
+    const rows = [rep('2026-07-01', 'Micro', 45, 12, 10, { session_id: 'm1' }),
+      rep('2026-07-01', 'Micro', 45, 10, 10, { session_id: 'm2' }),
+      rep('2026-07-01', 'Crusher', 45, 9, 10, { session_id: 'c1' })];
+    const out = buildCheckIn(rows, [], [], { refDate: REF });
+    expect(out.trainingPattern.totals).toMatchObject({ trainingDays: 1, blocks: 3 });
+    expect(out.sections.did.join(' ')).toMatch(/Micro: 1 training day, 2 identified blocks/);
+    expect(out.coaching).toMatchObject({ mode: 'observe_only', recommendations: [] });
+    expect(out.sections.headsUp.join(' ')).not.toMatch(/accidental|Delete/);
+  });
   test("volume + zone coverage per grip, last 7d only", () => {
     const hist = [
       rep("2026-07-01", "Micro", 45, 50),
@@ -19,10 +29,11 @@ describe("gatherCheckInSignals", () => {
       rep("2026-07-02", "Crusher", 7, 8),
     ];
     const s = gatherCheckInSignals(hist, [], [], { refDate: REF });
-    expect(s.volume.Micro.sessions).toBe(2);
+    expect(s.volume.Micro.days).toBe(2);
+    expect(s.volume.Micro.blocks).toBe(2);
     expect(s.volume.Micro.tutS).toBe(160);
     expect(s.volume.Micro.zones).toBe(2);           // power + strength
-    expect(s.volume.Crusher.sessions).toBe(1);
+    expect(s.volume.Crusher.days).toBe(1);
   });
 
   test("zone-level staleness (21d+) per grip", () => {
@@ -58,7 +69,7 @@ describe("gatherCheckInSignals", () => {
     ];
     const bwLog = [{ date: "2026-06-10", kg: 71.0 }, { date: "2026-07-04", kg: 72.4 }];
     const s = gatherCheckInSignals(hist, acts, [], { refDate: REF, bwLog });
-    expect(s.climbCtx.sessions).toBe(2);
+    expect(s.climbCtx.days).toBe(2);
     expect(s.climbCtx.hardestSend).toBe("V6");      // attempt doesn't count as send
     expect(s.climbCtx.avgRpe).toBeCloseTo(8, 1);
     expect(s.bw.deltaKg).toBeCloseTo(1.4, 2);
@@ -81,16 +92,16 @@ describe("gatherCheckInSignals", () => {
     expect(s.dataQuality.tinyList.join(" ")).toMatch(/Micro 2026-07-01 \(1 rep\)/);
   });
 
-  test("heads-up lines carry grip + date so sessions are findable", () => {
+  test("short sessions are not presumed accidental and never prompt deletion", () => {
     const hist = [
       rep("2026-07-01", "Micro", 45, 46),          // tiny session
       rep("2026-06-20", "Crusher", 7, 8),          // tiny session
     ];
     const out = assembleCheckIn(gatherCheckInSignals(hist, [], [], { refDate: REF }));
     const flat = out.sections.headsUp.join(" ");
-    expect(flat).toMatch(/Micro 2026-07-01 \(1 rep\)/);
-    expect(flat).toMatch(/Crusher 2026-06-20 \(1 rep\)/);
-    expect(flat).toMatch(/Delete in History/);
+    expect(flat).not.toMatch(/accidental|Delete in History|≤2 reps/);
+    expect(out.trainingPattern.totals).toMatchObject({ trainingDays: 1, blocks: 1, reps: 1 });
+    expect(out.coaching.recommendations).toEqual([]);
   });
 });
 
@@ -99,7 +110,7 @@ describe("assembleCheckIn", () => {
     const out = buildCheckIn([], [], [], { refDate: REF });
     expect(out.sections).not.toBeNull();
     expect(out.sections.did[0]).toMatch(/No finger or climbing sessions/);
-    expect(out.sections.headsUp[0]).toMatch(/looks clean/);
+    expect(out.sections.headsUp).toEqual([]);
   });
 
   test("truly empty (no data, no refDate) → headline only, no sections", () => {
@@ -108,7 +119,7 @@ describe("assembleCheckIn", () => {
     expect(out.headline).toMatch(/No training logged/);
   });
 
-  test("five sections populate; focus ≤3; heads-up falls back to all-clear", () => {
+  test("sections contain recorded facts; focus ≤3; missing data notes stay silent", () => {
     const hist = [
       rep("2026-04-01", "Micro", 200, 190),          // stale endurance zone → focus
       rep("2026-07-01", "Micro", 45, 50),
@@ -118,11 +129,11 @@ describe("assembleCheckIn", () => {
     ];
     const out = buildCheckIn(hist, [], [], { refDate: REF });
     expect(out.sections.did.length).toBeGreaterThan(0);
-    expect(out.sections.did[0]).toMatch(/Micro: 2 sessions/);
+    expect(out.sections.did[0]).toMatch(/Micro: 2 training days, 2 identified blocks/);
     expect(out.sections.focus.length).toBeGreaterThan(0);
     expect(out.sections.focus.length).toBeLessThanOrEqual(3);
     expect(out.sections.focus.join(" ")).toMatch(/endurance/);
-    expect(out.sections.headsUp.length).toBeGreaterThan(0);
+    expect(out.sections.headsUp).toEqual([]);
     // compact digest points still present for the collapsed card
     expect(Array.isArray(out.points)).toBe(true);
   });

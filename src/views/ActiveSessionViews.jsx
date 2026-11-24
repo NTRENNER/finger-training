@@ -834,7 +834,7 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
               <Label>Time</Label>
               <span style={{
                 fontSize: 28, fontWeight: 700,
-                color: nextDomain ? C.text : displayedRepTime(lastRep.actualTime, lastRep.forceRecording) >= lastRep.targetTime ? C.green : C.red,
+                color: nextDomain ? C.text : displayedRepTime(lastRep.actualTime, lastRep.forceRecording) >= lastRep.targetTime ? C.green : C.text,
               }}>
                 {Math.round(displayedRepTime(lastRep.actualTime, lastRep.forceRecording))}s
               </span>
@@ -857,8 +857,8 @@ export function RestView({ lastRep, nextWeight, nextDomain = null, nextAdjustmen
               </div>
             )}
           </div>
-          {['met', 'missed'].includes(lastRep.forceRecording?.session_protocol?.target_outcome) && <p style={{ color: lastRep.forceRecording.session_protocol.target_outcome === 'met' ? C.green : C.orange }}>
-            {lastRep.forceRecording.session_protocol.target_outcome === 'met' ? 'Target met' : 'Target missed'}
+          {['met', 'missed'].includes(lastRep.forceRecording?.session_protocol?.target_outcome) && <p style={{ color: lastRep.forceRecording.session_protocol.target_outcome === 'met' ? C.green : C.muted }}>
+            {lastRep.forceRecording.session_protocol.target_outcome === 'met' ? 'Target time reached' : 'Below target time'}
           </p>}
           <RepResultDetails rep={{ failure_valid: lastRep.failureValid, end_reason: lastRep.endReason,
             force_recording: lastRep.forceRecording, load_provenance: lastRep.loadProvenance }}>
@@ -1056,7 +1056,7 @@ export function SessionSummaryView({
               {levelTitle(newLevel)}
             </div>
             <div style={{ fontSize: 13, color: C.muted, marginTop: 6 }}>
-              5% load improvement — keep going
+              5% load improvement
             </div>
           </div>
         </Card>
@@ -1147,7 +1147,7 @@ export function SessionSummaryView({
                     <RepResultDetails rep={r} />
                   </td>
                   <td style={{ textAlign: "right" }}>{fmtW(prescribedLoad(r), unit)} {unit}</td>
-                  <td style={{ textAlign: "right", color: isMixedDomainRep(r) ? C.text : displayedRepTime(r.actual_time_s, r.force_recording) >= r.target_duration ? C.green : C.red }}>
+                  <td style={{ textAlign: "right", color: isMixedDomainRep(r) ? C.text : displayedRepTime(r.actual_time_s, r.force_recording) >= r.target_duration ? C.green : C.text }}>
                     {fmtTime(displayedRepTime(r.actual_time_s, r.force_recording))}
                   </td>
                   {hasForce && (
